@@ -81,6 +81,7 @@ cap_add:
 - Needs rootful Docker. In rootless Docker/Podman, GlobeGate logs why conntrack is unavailable and carries on with the other sources.
 - With `network_mode: host` the UI is served directly on the host's port 3000 (no `ports:` mapping). If Traefik proxies GlobeGate, point it at the host IP rather than the container name.
 - Don't want this? Remove those two keys and add `ports: ["3000:3000"]`.
+- With host networking, port 3000 is open on **every interface of the host**. If a reverse proxy handles access control, don't let the LAN bypass it. See [Behind Traefik with host networking](#behind-traefik-with-host-networking).
 
 What gets shown:
 
@@ -89,6 +90,34 @@ What gets shown:
 - Ports `80,443` are skipped by default since the Traefik log already shows those requests in more detail (`CONNTRACK_IGNORE_PORTS`).
 - The same IP and port appears at most once every 30 s (`CONNTRACK_DEDUPE_SECONDS`).
 - Common ports are named automatically (22 → `ssh`, 51820 → `wireguard`…); add your own with `CONNTRACK_PORT_NAMES=25565:minecraft,2456:valheim`.
+
+#### Behind Traefik with host networking
+
+A container using `network_mode: host` can't join Traefik's Docker network. Traefik's Docker provider still routes to it via `host.docker.internal`:
+
+1. Let the Traefik container resolve the host by adding this to **Traefik's** service:
+
+   ```yaml
+   extra_hosts:
+     - host.docker.internal:host-gateway
+   ```
+
+2. Make GlobeGate listen only on the Docker bridge address, so it's reachable from containers (Traefik) but not from the LAN. Find it with `ip -4 addr show docker0` (usually `172.17.0.1`) and set it in `.env`:
+
+   ```env
+   LISTEN_ADDRESS=172.17.0.1
+   ```
+
+3. Keep your usual Traefik labels on GlobeGate, without `networks:`:
+
+   ```yaml
+   labels:
+     - traefik.enable=true
+     - traefik.http.routers.globegate.rule=Host(`globe.example.com`)
+     - traefik.http.services.globegate.loadbalancer.server.port=3000
+   ```
+
+If Traefik returns a 502, a host firewall (ufw, firewalld) is probably blocking traffic from Docker networks to port 3000 on the host.
 
 #### Behind NAT / double NAT
 
@@ -130,6 +159,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `CONNTRACK_PORT_NAMES` | — | Extra port names, e.g. `25565:minecraft` |
 | `DEMO` | `auto` | Fake traffic: `auto` (only when no source is available), `true` or `false` |
 | `PORT` | `3000` | HTTP/WebSocket port |
+| `LISTEN_ADDRESS` | all interfaces | Listen only on this address, e.g. the Docker bridge IP `172.17.0.1` (see below) |
 | `TRAEFIK_LOG_PATH` | `/logs/access.log` | Traefik log inside the container |
 | `GEOIP_DB_PATH` | `/geoip/GeoLite2-City.mmdb` | GeoIP database inside the container |
 | `DB_PATH` | `/data/connections.db` | SQLite history inside the container |

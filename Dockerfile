@@ -56,7 +56,10 @@ LABEL org.opencontainers.image.title="GlobeGate" \
 VOLUME ["/data", "/geoip"]
 EXPOSE 3000
 
+# Probe the address the app listens on (LISTEN_ADDRESS), or loopback when it listens everywhere
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/health" >/dev/null || exit 1
+  CMD a="${LISTEN_ADDRESS:-127.0.0.1}"; \
+      case "$a" in 0.0.0.0|::|"[::]") a=127.0.0.1 ;; *:*) a="[$a]" ;; esac; \
+      wget -qO- "http://$a:${PORT}/health" >/dev/null || exit 1
 
 ENTRYPOINT ["/sbin/tini", "--", "/app/docker-entrypoint.sh"]

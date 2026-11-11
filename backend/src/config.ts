@@ -63,6 +63,10 @@ function readVersion(): string {
 export const config = {
   version:     readVersion(),
   port:        int('PORT', 3000),
+  // Address to listen on (default: all interfaces). With network_mode: host, set
+  // it to the Docker bridge IP (e.g. 172.17.0.1) so only containers such as
+  // your reverse proxy can reach the UI — not the whole LAN.
+  listenAddress: env('LISTEN_ADDRESS'),
 
   // ── Paths ──
   logPath:     env('TRAEFIK_LOG_PATH') ?? './data/access.log',

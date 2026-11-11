@@ -85,8 +85,8 @@ async function main(): Promise<void> {
     hub.addSource('demo');
   }
 
-  server.listen(config.port, () => {
-    console.log(`🚀 Listening on :${config.port} — sources: ${hub.sources.join(', ') || 'none'} — IPs: ${config.ipDisplay}`);
+  server.listen(config.port, config.listenAddress, () => {
+    console.log(`🚀 Listening on ${config.listenAddress ?? '*'}:${config.port} — sources: ${hub.sources.join(', ') || 'none'} — IPs: ${config.ipDisplay}`);
   });
 
   // ── Graceful shutdown (docker stop) ──

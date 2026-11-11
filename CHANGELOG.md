@@ -16,6 +16,7 @@ First public release.
 - `RETENTION_DAYS` to choose how long history is kept (default 7).
 - `MAXMIND_ACCOUNT_ID` to use MaxMind's current authenticated download endpoint.
 - `DEMO` to force or disable demo mode.
+- `LISTEN_ADDRESS` to listen on a single address, e.g. the Docker bridge IP when running with host networking behind Traefik.
 - Version shown in the settings drawer and returned by `/health`.
 - Multi-arch images (amd64, arm64) with SBOM and build provenance, published to GHCR on every release.
 
