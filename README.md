@@ -14,8 +14,10 @@
 - **Live globe**: every connection draws an arc from the visitor's city to your server, colored by service.
 - **More than HTTP**: reads Traefik's access log for web requests *and* the kernel's connection table for everything else: SSH, WireGuard, Minecraft, Plex…
 - **Works behind NAT**, including double NAT, as long as ports are forwarded.
-- **Insights**: requests per minute, protocol filter (HTTP / TCP / UDP), top services, top countries, status codes.
-- **History**: a timeline to replay any moment of the last 7 days (configurable).
+- **Insights**: totals for the last hour, 6 hours, day or week; protocol filter (HTTP / TCP / UDP); top services, countries and visitors.
+- **Replay**: click the timeline to watch the past like a video, or press ▶ to play a whole day in a minute. Quiet stretches are skipped.
+- **Visitor details**: click an arc or a feed card to see everything an IP did: its network (ISP / hosting company), first and last visit, services, latest requests.
+- **CrowdSec bans** (optional): banned attackers appear as red dots, new bans strike the server, and requests from banned IPs are marked 🛡.
 - **Private by default**: GeoIP lookups run locally (MaxMind GeoLite2), visitor IPs are masked in the UI, no third-party requests from the page.
 - **Small and self-contained**: one container, SQLite storage, amd64 and arm64 images.
 
@@ -139,6 +141,25 @@ sudo conntrack -L -p tcp --dport 22
 
 If `src=` shows your phone's public IP, GlobeGate will too. If it shows a private address like `192.168.x.x`, a router is rewriting the source. Look for an "SNAT" or "masquerade" option on its forwarding rule.
 
+### CrowdSec bans (optional)
+
+If you run [CrowdSec](https://www.crowdsec.net/), GlobeGate can show its bans. It reads them from the CrowdSec Local API with its own read-only bouncer key:
+
+1. Create a key: `docker exec crowdsec cscli bouncers add globegate` (or `sudo cscli bouncers add globegate` without Docker).
+2. Make the Local API reachable from GlobeGate. With `network_mode: host`, publish it on the host's loopback in CrowdSec's compose file:
+   ```yaml
+   crowdsec:
+     ports:
+       - "127.0.0.1:8081:8080"
+   ```
+3. Add to `.env`:
+   ```env
+   CROWDSEC_LAPI_URL=http://127.0.0.1:8081
+   CROWDSEC_API_KEY=<the key from step 1>
+   ```
+
+By default only bans decided on your server (`crowdsec`) or by you (`cscli`, `console`) are shown, not the community blocklists: those hold tens of thousands of IPs that never connected to you. Change this with `CROWDSEC_ORIGINS`.
+
 ## Configuration
 
 All settings are environment variables (see [`.env.example`](.env.example)).
@@ -147,7 +168,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 |---|---|---|
 | `SERVER_LAT` / `SERVER_LON` | `48.8566` / `2.3522` | Where arcs land |
 | `SERVER_LABEL` | `My Server` | Label shown in the header |
-| `MAXMIND_LICENSE_KEY` | — | Downloads GeoLite2-City at start and refreshes it weekly |
+| `MAXMIND_LICENSE_KEY` | — | Downloads GeoLite2-City (locations) and GeoLite2-ASN (ISP names) at start, refreshed weekly |
 | `MAXMIND_ACCOUNT_ID` | — | Recommended with the key: uses MaxMind's authenticated download endpoint |
 | `IP_DISPLAY` | `masked` | What viewers see: `masked` (`203.0.113.x`), `full` or `hidden` |
 | `IGNORE_IPS` | — | IPs/CIDRs dropped before storage, e.g. uptime monitors |
@@ -159,21 +180,32 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `CONNTRACK_ONLY_PORTS` | — | Only show these ports |
 | `CONNTRACK_DEDUPE_SECONDS` | `30` | Show the same IP and port at most once per N seconds |
 | `CONNTRACK_PORT_NAMES` | — | Extra port names, e.g. `25565:minecraft` |
+| `CROWDSEC_LAPI_URL` | — | CrowdSec Local API, e.g. `http://127.0.0.1:8081` (see [CrowdSec bans](#crowdsec-bans-optional)) |
+| `CROWDSEC_API_KEY` | — | Bouncer key from `cscli bouncers add globegate`. `CROWDSEC_API_KEY_FILE` reads it from a file (Docker secrets) |
+| `CROWDSEC_ORIGINS` | `crowdsec,cscli,console` | Which decisions to show. Add `CAPI,lists` for the community blocklists |
+| `CROWDSEC_POLL_SECONDS` | `10` | How often new bans are fetched |
 | `DEMO` | `auto` | Fake traffic: `auto` (only when no source is available), `true` or `false` |
 | `PORT` | `3000` | HTTP/WebSocket port |
 | `LISTEN_ADDRESS` | all interfaces | Listen only on this address, e.g. the Docker bridge IP `172.17.0.1` (see below) |
 | `TRAEFIK_LOG_PATH` | `/logs/access.log` | Traefik log inside the container |
 | `GEOIP_DB_PATH` | `/geoip/GeoLite2-City.mmdb` | GeoIP database inside the container |
+| `GEOIP_ASN_DB_PATH` | `GeoLite2-ASN.mmdb` next to it | ISP database (optional) |
 | `DB_PATH` | `/data/connections.db` | SQLite history inside the container |
 
-Already have a GeoLite2 database (e.g. from `geoipupdate`)? Mount it at `/geoip/GeoLite2-City.mmdb` and leave the MaxMind variables empty.
+Already have GeoLite2 databases (e.g. from `geoipupdate`)? Mount them at `/geoip/GeoLite2-City.mmdb` (and optionally `/geoip/GeoLite2-ASN.mmdb`) and leave the MaxMind variables empty.
+
+## Using the dashboard
+
+- **Period**: the buttons at the bottom left pick the last hour, 6 hours, 24 hours or 7 days. The side panels sum up that period; live connections are added as they arrive.
+- **Replay**: click the activity bars to jump back to that moment and watch it play. ▶ plays the whole period in about a minute; the speed button changes that. Quiet stretches are skipped, pausing freezes the arcs, and playback returns to live when it catches up. With the timeline focused: `Space` play/pause, `←` `→` step, `End` live.
+- **Details**: click an arc, a red ban dot, a feed card or a visitor in the *Top* list.
 
 ## Privacy and exposing the dashboard
 
 GlobeGate shows who connects to your server. Before making it reachable from the internet:
 
 - **Put it behind authentication** (e.g. Traefik's BasicAuth or ForwardAuth middleware, Authelia, Authentik) unless you really want a public page.
-- Keep `IP_DISPLAY=masked` (the default) or `hidden`. Full IPs are stored in the local database for `RETENTION_DAYS` but never sent to viewers unless `IP_DISPLAY=full`.
+- Keep `IP_DISPLAY=masked` (the default) or `hidden`. Full IPs are stored in the local database for `RETENTION_DAYS` but never sent to viewers unless `IP_DISPLAY=full`. Viewers can still open the details of a visitor (its network, visits and requests), with the IP shown the same way.
 - In the EU, IP addresses are personal data. Keep retention short and only collect what you need.
 
 ## Hide your own traffic
@@ -194,12 +226,12 @@ Token-like path segments (webhook IDs, invite links, UUIDs) are always masked as
 
 ```
 Traefik access.log (JSON) ──┐
-                            ├─▶ Node.js ─▶ MaxMind GeoIP ─▶ SQLite + WebSocket ─▶ Three.js globe
-Linux conntrack (TCP/UDP) ──┘
+Linux conntrack (TCP/UDP) ──┼─▶ Node.js ─▶ MaxMind GeoIP + ASN ─▶ SQLite + WebSocket ─▶ Three.js globe
+CrowdSec Local API (bans) ──┘
 ```
 
-- **Backend** (Node.js 26, TypeScript): tails the Traefik log, streams `conntrack -E` events, geolocates public IPs offline, stores history in SQLite and broadcasts over WebSocket (`/ws`). REST: `/api/history`, `/api/density`, `/health`.
-- **Frontend** (Vite, TypeScript, Three.js): dotted globe, animated arcs, live feed, stats and the history timeline.
+- **Backend** (Node.js 26, TypeScript): tails the Traefik log, streams `conntrack -E` events, geolocates public IPs offline, stores history in SQLite and broadcasts over WebSocket (`/ws`). REST: `/api/summary` (period totals), `/api/density` (timeline bars), `/api/history` (playback), `/api/visitor` (details), `/health`.
+- **Frontend** (Vite, TypeScript, Three.js): dotted globe, animated arcs, live feed, stats, the replay player and the details panel.
 
 ## Development
 

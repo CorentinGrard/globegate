@@ -6,12 +6,14 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import { scene, camera, renderer, loadGlobeTexture, applyMomentum } from './globe';
 import { tickArcs }       from './arcs';
+import { tickBans }       from './bans';
 import { updateCounters } from './stats';
 import { connect }        from './ws';
-import { loadDensity }    from './timeline';
+import { refresh }        from './timeline';
 
 // Side-effect imports (register event listeners)
 import './settings';
+import './details';
 
 // ── Mount renderer ────────────────────────────
 document.getElementById('canvas-container')!.appendChild(renderer.domElement);
@@ -26,6 +28,7 @@ function animate(): void {
 
   applyMomentum();
   tickArcs(dt);
+  tickBans(dt);
   renderer.render(scene, camera);
 }
 
@@ -40,5 +43,5 @@ function animate(): void {
 
   // Periodic UI refreshes
   setInterval(updateCounters, 5_000);
-  setInterval(() => void loadDensity(), 5 * 60_000);
+  setInterval(() => void refresh(), 60_000); // roll the period forward (skipped during a replay)
 })();

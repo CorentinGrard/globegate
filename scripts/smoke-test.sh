@@ -41,6 +41,10 @@ latest=$(curl -fsS "http://127.0.0.1:${PORT}/api/history?limit=1") || fail "/api
 grep -q '\.x"' <<<"$latest" || fail "IPs are not masked by default"
 echo "✅ $rows connection(s) recorded, IPs masked"
 
+summary=$(curl -fsS "http://127.0.0.1:${PORT}/api/summary") || fail "/api/summary not reachable"
+grep -q '"total":[1-9]' <<<"$summary" || fail "/api/summary has no totals"
+echo "✅ period summary"
+
 start=$(date +%s)
 docker stop -t 10 "$NAME" >/dev/null
 took=$(( $(date +%s) - start ))

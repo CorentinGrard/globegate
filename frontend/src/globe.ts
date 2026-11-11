@@ -119,6 +119,24 @@ export function ll2v(lat: number, lon: number, r = GLOBE_R): THREE.Vector3 {
   );
 }
 
+/**
+ * Screen position (CSS pixels) of a point in globe coordinates, or null when
+ * it's behind the globe. Uses the matrices of the last rendered frame.
+ */
+const _w = new THREE.Vector3();
+const _d = new THREE.Vector3();
+export function toScreen(local: THREE.Vector3): { x: number; y: number } | null {
+  _w.copy(local).applyMatrix4(globeGroup.matrixWorld);
+  // Does the line of sight from the camera cross the globe before the point?
+  const c = camera.position;
+  _d.copy(_w).sub(c);
+  const t = -c.dot(_d) / _d.lengthSq();
+  if (t > 0 && t < 1 && _d.multiplyScalar(t).add(c).length() < GLOBE_R * 0.995) return null;
+  _w.project(camera);
+  if (_w.z > 1) return null;
+  return { x: (_w.x + 1) / 2 * window.innerWidth, y: (1 - _w.y) / 2 * window.innerHeight };
+}
+
 // ── Shared soft-glow sprite texture ───────────
 export const glowTexture = (() => {
   const c = document.createElement('canvas');

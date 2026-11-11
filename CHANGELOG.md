@@ -10,6 +10,12 @@ Add your changes under **Unreleased** in the same PR as the code. `scripts/relea
 First public release.
 
 ### Added
+- **Replay player**: pick a period (last hour, 6 hours, 24 hours or 7 days) and watch it like a video. Click the timeline to jump to a moment, ▶ plays the whole period in about a minute (speed adjustable), quiet stretches are skipped, pausing freezes the arcs, and playback rejoins live when it catches up. The side panels sum up the chosen period, live or replaying.
+- **Visitor details**: click an arc, a feed card or a visitor to see everything stored about that IP: network owner, first and last visit, activity over the week, services, ports and status codes, latest requests and CrowdSec bans.
+- **ISP names** from MaxMind GeoLite2-ASN, downloaded with the same key (`GEOIP_ASN_DB_PATH` to use your own file).
+- **CrowdSec bans**: with `CROWDSEC_LAPI_URL` and a bouncer key (`CROWDSEC_API_KEY`), banned attackers appear as red dots, new bans strike the server and show in the feed, requests from banned IPs are marked 🛡, and a panel lists the active bans. Only bans decided on your server or by you are shown by default (`CROWDSEC_ORIGINS`).
+- *Top* panel with services, countries and the most active visitors.
+- Demo mode now also shows returning visitors, ISPs and bans.
 - **Every inbound TCP/UDP connection**, not just HTTP: SSH, VPNs, game servers… read from the Linux connection-tracking table (`conntrack`). Works behind NAT and double NAT with port forwarding. Configure with `CONNTRACK*` variables.
 - Protocol filter (All / HTTP / TCP / UDP), top countries panel and country flags in the feed.
 - Privacy controls: `IP_DISPLAY` (`masked` by default, `full` or `hidden`) and `IGNORE_IPS` to drop addresses or ranges before they are stored.
@@ -23,7 +29,6 @@ First public release.
 - Multi-arch images (amd64, arm64) with SBOM and build provenance, published to GHCR on every release.
 
 ### Changed
-- **History replay**: click, drag or use the arrow keys on the timeline bars to replay exactly that period. The panels show its real totals, an even sample of its connections is animated, and the tooltip shows each bar's period and connection count. Previously a click replayed a blind 5-minute window, which was usually empty.
 - Redesigned interface: dotted globe with atmosphere glow, animated arcs with impact ripples, glass panels, floating timeline, responsive layout.
 - Fonts are bundled with the app; the page no longer loads anything from third-party servers.
 - Traefik router names are shown without their provider suffix (`jellyfin@docker` → `jellyfin`).

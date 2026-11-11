@@ -5,17 +5,10 @@ import * as THREE from 'three';
 import { Line2 }        from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { globeGroup, GLOBE_R, ll2v, makeGlow, onResize, getServerPos, SERVER_COLOR } from './globe.js';
-import type { Connection, Proto } from './types.js';
+import { globeGroup, GLOBE_R, ll2v, makeGlow, onResize, getServerPos, SERVER_COLOR, toScreen } from './globe.js';
+import type { Connection, LatLon, Proto } from './types.js';
 
-// ── localStorage that never throws (private mode etc.) ──
-function load<T>(key: string, fallback: T): T {
-  try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v) as T; }
-  catch { return fallback; }
-}
-function save(key: string, value: unknown): void {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
-}
+import { load, save } from './util.js';
 
 // ── Arc hold duration ─────────────────────────
 export let arcHoldSeconds = Number(load('arcHold', 3.5)) || 3.5;
@@ -127,9 +120,14 @@ interface Arc {
   fade:     number;
   state:    ArcState;
   onFade:   (() => void) | null;
+  conn:     Connection | null;  // for picking; null for decorative arcs
 }
 
 const MAX_ARCS = 160;
+
+// While a replay is paused, drawn arcs stay on screen (so they can be clicked)
+let frozen = false;
+export function setArcsFrozen(f: boolean): void { frozen = f; }
 const SEGMENTS = 64;
 let arcs: Arc[] = [];
 
@@ -142,16 +140,24 @@ function parseColor(css: string): THREE.Color {
 /** Spawn an animated arc. Returns the arc handle (or null if hidden). */
 export function spawnArc(conn: Connection, onFade: (() => void) | null = null): Arc | null {
   if (!isVisible(conn)) return null;
+  return spawnArcBetween(conn.source, conn.target, conn.color, onFade, conn);
+}
+
+/** Arc between any two points (also used for CrowdSec bans). */
+export function spawnArcBetween(
+  from: LatLon, to: LatLon, css: string,
+  onFade: (() => void) | null = null, conn: Connection | null = null, rippleSize = 0.035,
+): Arc {
   if (arcs.length >= MAX_ARCS) { const old = arcs.shift(); if (old) disposeArc(old); }
 
-  const s   = ll2v(conn.source.lat, conn.source.lon, GLOBE_R + 0.003);
-  const d   = ll2v(conn.target.lat, conn.target.lon, GLOBE_R + 0.003);
+  const s   = ll2v(from.lat, from.lon, GLOBE_R + 0.003);
+  const d   = ll2v(to.lat, to.lon, GLOBE_R + 0.003);
   const dist = s.distanceTo(d);
   const mid = s.clone().add(d).multiplyScalar(0.5).normalize().multiplyScalar(GLOBE_R + dist * 0.34 + 0.04);
   const curve = new THREE.QuadraticBezierCurve3(s, mid, d);
 
   const pts    = curve.getPoints(SEGMENTS);
-  const color  = parseColor(conn.color);
+  const color  = parseColor(css);
   const pos: number[] = [];
   const cols: number[] = [];
   pts.forEach((p, i) => {
@@ -187,14 +193,35 @@ export function spawnArc(conn: Connection, onFade: (() => void) | null = null): 
   src.position.copy(s);
   globeGroup.add(src);
 
-  spawnRipple(s, color, 0.035, 1.0);
+  spawnRipple(s, color, rippleSize, 1.0);
 
   const arc: Arc = {
     line, geo, mat, curve, head, src, color,
-    segments: SEGMENTS, progress: 0, hold: 0, fade: 0, state: 'drawing', onFade,
+    segments: SEGMENTS, progress: 0, hold: 0, fade: 0, state: 'drawing', onFade, conn,
   };
   arcs.push(arc);
   return arc;
+}
+
+// ── Picking (click / hover on the globe) ──────
+const PICK_SAMPLES = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9];
+
+/** The connection whose arc passes closest to a screen point, within `maxPx`. */
+export function pickArc(x: number, y: number, maxPx = 14): { conn: Connection; d: number } | null {
+  let best: { conn: Connection; d: number } | null = null;
+  const p = new THREE.Vector3();
+  for (const a of arcs) {
+    if (!a.conn || a.state === 'fading') continue;
+    const drawn = a.state === 'drawing' ? 1 - Math.pow(1 - a.progress, 2) : 1;
+    for (const t of PICK_SAMPLES) {
+      if (t > drawn) break;
+      const sp = toScreen(a.curve.getPoint(t, p));
+      if (!sp) continue;
+      const d = Math.hypot(sp.x - x, sp.y - y) - (t === 0 ? 4 : 0); // the source dot is a bigger target
+      if (d <= maxPx && (!best || d < best.d)) best = { conn: a.conn, d };
+    }
+  }
+  return best;
 }
 
 /** Advance all arcs, ripples and the server beacon by dt seconds. */
@@ -217,7 +244,7 @@ export function tickArcs(dt: number): void {
         spawnRipple(a.curve.v2, a.color, 0.06, 1.1);
       }
     } else if (a.state === 'holding') {
-      a.hold += dt;
+      if (!frozen) a.hold += dt;
       if (a.hold > arcHoldSeconds) { a.state = 'fading'; a.onFade?.(); }
     } else {
       a.fade = Math.min(1, a.fade + dt * 0.8);

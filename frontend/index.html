@@ -43,6 +43,8 @@
       var(--bg);
   }
   button { font:inherit; color:inherit; background:none; border:none; cursor:pointer; }
+  [hidden] { display:none !important; }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .mono { font-family:var(--mono); }
   #canvas-container { position:fixed; inset:0; z-index:0; }
   #canvas-container canvas { display:block; }
@@ -90,6 +92,7 @@
   #sidebar::-webkit-scrollbar { display:none; }
 
   .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:8px; }
+  .stats-cap { grid-column:1 / -1; padding:2px 6px 0; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .stat { padding:10px 12px; border-radius:10px; background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.03); }
   .stat-l { font-size:11px; color:var(--muted); display:flex; align-items:center; gap:6px; }
   .stat-l svg { width:12px; height:12px; color:var(--dim); }
@@ -105,7 +108,24 @@
   .seg .seg-n { font-size:10.5px; color:var(--dim); font-family:var(--mono); }
 
   .rank { display:flex; flex-direction:column; gap:8px; }
-  .rank-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; font-size:12.5px; }
+  .rank-row { display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:8px; font-size:12.5px; width:100%; text-align:left; }
+  button.rank-row { border-radius:6px; padding:2px 4px; margin:-2px -4px; width:calc(100% + 8px); }
+  button.rank-row:hover { background:rgba(255,255,255,.05); }
+  .rank-name small { color:var(--dim); font-size:11px; }
+  .tabs { display:flex; gap:2px; padding:2px; border-radius:8px; background:rgba(0,0,0,.25); border:1px solid var(--stroke); }
+  .tabs button { padding:3px 8px; border-radius:6px; font-size:11px; font-weight:500; color:var(--muted); }
+  .tabs button:hover { color:var(--text); }
+  .tabs button.on { background:rgba(255,255,255,.09); color:var(--text); }
+
+  /* ── CrowdSec card ── */
+  .ban-list { display:flex; flex-direction:column; gap:6px; }
+  .ban-row { display:grid; grid-template-columns:18px 1fr auto; column-gap:8px; row-gap:1px; align-items:center; width:100%; text-align:left; padding:5px 6px; margin:0 -6px; width:calc(100% + 12px); border-radius:8px; }
+  .ban-row:hover { background:rgba(248,113,113,.08); }
+  .ban-ic { grid-row:1 / 3; font-size:13px; text-align:center; }
+  .ban-who { font-family:var(--mono); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ban-t { font-family:var(--mono); font-size:11px; color:var(--err); }
+  .ban-why { grid-column:2 / 4; font-size:11px; color:var(--dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #card-bans .card-t { color:var(--err); }
   .rank-ic { width:18px; text-align:center; font-size:13px; line-height:1; }
   .rank-ic i { display:inline-block; width:8px; height:8px; border-radius:50%; }
   .rank-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -118,7 +138,10 @@
   #feed-head { display:flex; align-items:center; gap:8px; margin:0 0 8px 4px; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); text-shadow:0 1px 8px rgba(0,0,0,.8); }
   #feed-list { display:flex; flex-direction:column; gap:6px; }
   .fi { display:grid; grid-template-columns:3px 1fr auto; align-items:center; gap:12px; padding:9px 12px 9px 9px; animation:fiIn .35s cubic-bezier(.2,.8,.2,1); }
-  .fi { max-height:90px; }
+  .fi { max-height:90px; width:100%; text-align:left; transition:border-color .15s, background .15s; }
+  .fi:hover { border-color:var(--stroke-strong); background:rgba(20,26,44,.75); }
+  .fi.ban { border-color:rgba(248,113,113,.3); background:rgba(60,16,22,.55); }
+  .fi-blocked { font-size:12px; line-height:1; flex-shrink:0; }
   .fi.leaving { animation:fiOut .45s ease forwards; overflow:hidden; }
   @keyframes fiIn  { from{opacity:0; transform:translateY(8px) scale(.98)} to{opacity:1; transform:none} }
   @keyframes fiOut { to{opacity:0; transform:translateX(-12px); max-height:0; padding-top:0; padding-bottom:0; margin-top:-6px; border-width:0} }
@@ -157,10 +180,68 @@
   #tl-cursor.live { border-color:var(--live); box-shadow:0 0 0 4px rgba(52,211,153,.2), 0 2px 10px rgba(0,0,0,.5); }
   #tl-tooltip { position:absolute; top:-30px; transform:translateX(-50%); padding:4px 9px; border-radius:7px; font-size:11px; font-family:var(--mono); white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .15s; background:var(--glass-strong); border:1px solid var(--stroke-strong); }
   #tl-tooltip.show { opacity:1; }
+  .tl-btn { height:40px; min-width:40px; display:grid; place-items:center; border-radius:11px; color:var(--muted); border:1px solid var(--stroke); background:rgba(255,255,255,.03); transition:all .2s; flex-shrink:0; }
+  .tl-btn:hover { color:var(--text); border-color:var(--stroke-strong); }
+  .tl-btn svg { width:15px; height:15px; }
+  #tl-play .ic-pause { display:none; }
+  #tl-play.playing { color:var(--warn); border-color:rgba(251,191,36,.35); background:rgba(251,191,36,.08); }
+  #tl-play.playing .ic-pause { display:block; }
+  #tl-play.playing .ic-play { display:none; }
+  .tl-speed { padding:0 10px; font-family:var(--mono); font-size:11px; white-space:nowrap; }
+  .tl-seg { display:flex; gap:2px; padding:3px; border-radius:11px; background:rgba(0,0,0,.25); border:1px solid var(--stroke); flex-shrink:0; }
+  .tl-seg button { height:32px; padding:0 9px; border-radius:8px; font-size:11.5px; font-weight:600; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .tl-seg button:hover { color:var(--text); }
+  .tl-seg button.on { background:rgba(255,255,255,.09); color:var(--text); }
+  #tl-clock { position:absolute; top:-27px; transform:translateX(-50%); padding:3px 8px; border-radius:7px; font-size:11px; font-family:var(--mono); white-space:nowrap; pointer-events:none; color:var(--warn); background:var(--glass-strong); border:1px solid rgba(251,191,36,.3); opacity:0; transition:opacity .15s; }
+  #tl-clock.show { opacity:1; }
+  #tl-track-wrap:hover #tl-clock { opacity:0; }
   #tl-live-pill { display:flex; align-items:center; gap:7px; height:40px; padding:0 16px; border-radius:11px; font-size:12px; font-weight:600; color:var(--muted); border:1px solid var(--stroke); background:rgba(255,255,255,.03); transition:all .2s; white-space:nowrap; }
   #tl-live-pill i { width:7px; height:7px; border-radius:50%; background:currentColor; }
   #tl-live-pill:hover { color:var(--text); border-color:var(--stroke-strong); }
   #tl-live-pill.active { color:var(--live); border-color:rgba(52,211,153,.3); background:rgba(52,211,153,.08); }
+
+  /* ── Globe hover label ── */
+  #globe-tip { position:fixed; left:0; top:0; z-index:15; pointer-events:none; padding:5px 9px; border-radius:8px; font-size:12px; white-space:nowrap; background:var(--glass-strong); border:1px solid var(--stroke-strong); opacity:0; transition:opacity .12s; }
+  #globe-tip.show { opacity:1; }
+
+  /* ── Visitor details ── */
+  #detail-panel { position:fixed; z-index:20; top:calc(var(--gap) + 66px); right:var(--gap); bottom:calc(var(--gap) + var(--tl-h) + 12px); width:340px; display:flex; flex-direction:column; background:var(--glass-strong); transform:translateX(calc(100% + var(--gap) * 2)); transition:transform .35s cubic-bezier(.2,.8,.2,1); }
+  #detail-panel.open { transform:none; }
+  .dp-head { display:grid; grid-template-columns:auto 1fr auto; gap:12px; align-items:center; padding:14px 10px 12px 16px; border-bottom:1px solid var(--stroke); }
+  .dp-flag { font-size:26px; line-height:1; }
+  #dp-loc { font-size:14px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dp-ip { font-family:var(--mono); font-size:12px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-top:2px; }
+  .dp-body { flex:1; overflow-y:auto; padding:14px 16px 18px; display:flex; flex-direction:column; gap:16px; }
+  .dp-loading { color:var(--dim); font-size:12.5px; line-height:1.5; }
+  .dp-org { font-size:13px; display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+  .dp-asn { font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .dp-bans { display:flex; flex-direction:column; gap:6px; }
+  .dp-ban { display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; padding:8px 10px; border-radius:10px; font-size:12px; background:rgba(255,255,255,.03); border:1px solid var(--stroke); color:var(--muted); }
+  .dp-ban.on { color:var(--text); background:rgba(248,113,113,.1); border-color:rgba(248,113,113,.35); }
+  .dp-ban-when { font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .dp-ban.on .dp-ban-when { color:var(--err); }
+  .dp-tiles { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+  .dp-tile { padding:8px 10px; border-radius:10px; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.04); min-width:0; }
+  .dp-tl { display:block; font-size:10.5px; color:var(--muted); }
+  .dp-tv { display:block; font-size:14px; font-weight:600; margin-top:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .dp-sec { display:flex; flex-direction:column; gap:10px; }
+  .dp-h { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .dp-act-bars { height:38px; display:flex; align-items:flex-end; gap:1px; }
+  .dp-act-bars i { flex:1; border-radius:1.5px 1.5px 0 0; background:linear-gradient(to top, rgba(124,156,255,.3), var(--accent)); }
+  .dp-act-bars i.z { background:rgba(255,255,255,.06); }
+  .dp-act-lab { display:flex; justify-content:space-between; font-size:10.5px; color:var(--dim); margin-top:4px; }
+  .dp-chips { display:flex; flex-wrap:wrap; gap:5px; }
+  .dp-recent { display:flex; flex-direction:column; }
+  .dp-r { display:grid; grid-template-columns:auto auto 1fr auto; gap:8px; align-items:baseline; padding:5px 0; border-top:1px solid rgba(255,255,255,.04); font-size:11.5px; }
+  .dp-r:first-child { border-top:none; }
+  .dp-r-t { font-family:var(--mono); font-size:10.5px; color:var(--dim); white-space:nowrap; }
+  .dp-r-svc { font-weight:500; white-space:nowrap; max-width:90px; overflow:hidden; text-overflow:ellipsis; }
+  .dp-r-what { font-family:var(--mono); font-size:10.5px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .dp-r-st { font-family:var(--mono); font-size:10.5px; color:var(--live); }
+  .dp-r-st.bad { color:var(--warn); }
+  .dp-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .dp-actions .sp-btn.ghost:hover { color:var(--text); border-color:var(--stroke-strong); }
+  .dp-actions .sp-btn:disabled { opacity:.5; cursor:default; }
 
   /* ── Settings drawer ── */
   #scrim { position:fixed; inset:0; z-index:25; background:rgba(3,5,10,.4); opacity:0; pointer-events:none; transition:opacity .25s; }
@@ -211,10 +292,10 @@
   @media (max-width: 1000px) {
     #sidebar { width:250px; }
     #feed { width:min(360px, calc(100vw - 300px)); }
-    #card-countries { display:none; }
+    .tl-lab { display:none; }
   }
-  @media (max-height: 880px) { #card-countries { display:none; } }
-  @media (max-height: 620px) { #card-services { display:none; } }
+  @media (max-height: 760px) { #card-proto { display:none; } }
+  @media (max-height: 620px) { #card-top { display:none; } }
 
   /* ════ MOBILE ════ */
   @media (max-width: 640px) {
@@ -227,7 +308,8 @@
     .status .lbl { display:none; }
     .icon-btn { width:38px; height:38px; }
     #sidebar { top:calc(var(--gap) + 58px); left:var(--gap); right:var(--gap); width:auto; max-height:none; overflow:visible; }
-    #card-services, #card-countries { display:none; }
+    #card-top, #card-bans { display:none; }
+    .stats-cap { display:none; }
     .stats { grid-template-columns:repeat(4,1fr); gap:4px; padding:5px; }
     .stat { padding:7px 8px; }
     .stat-l { font-size:10px; }
@@ -244,6 +326,12 @@
     #timeline { gap:8px; padding:0 6px 0 12px; }
     .tl-lab { display:none; }
     #tl-live-pill { height:36px; padding:0 12px; }
+    .tl-btn { height:36px; min-width:36px; }
+    .tl-speed { display:none; }
+    .tl-seg { padding:2px; }
+    .tl-seg button { height:30px; padding:0 8px; }
+    .tl-seg button:not(.on) { display:none; } /* tap the period to cycle */
+    #detail-panel { top:auto; left:var(--gap); right:var(--gap); width:auto; height:62vh; bottom:calc(var(--gap) + var(--tl-h) + 8px); transform:translateY(calc(100% + var(--tl-h) + var(--gap) * 3)); }
     #settings-panel { top:0; right:0; bottom:0; width:100vw; border-radius:0; }
   }
 </style>
@@ -277,6 +365,7 @@
 
 <aside id="sidebar">
   <section class="glass stats">
+    <div class="stats-cap" id="stats-cap">Last 24 hours</div>
     <div class="stat"><div class="stat-l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Connections</div><div class="stat-v" id="c-total">0</div></div>
     <div class="stat"><div class="stat-l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Per minute</div><div class="stat-v live" id="c-min">0</div></div>
     <div class="stat"><div class="stat-l"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>Countries</div><div class="stat-v" id="c-countries">0</div></div>
@@ -293,14 +382,21 @@
     </div>
   </section>
 
-  <section class="glass card" id="card-services">
-    <div class="card-h"><span class="card-t">Top services</span></div>
-    <div class="rank" id="svc-list"><span class="empty">Waiting for traffic…</span></div>
+  <section class="glass card" id="card-top">
+    <div class="card-h">
+      <span class="card-t">Top</span>
+      <div class="tabs" id="top-tabs" role="tablist" aria-label="Top list">
+        <button type="button" role="tab" data-tab="services">Services</button>
+        <button type="button" role="tab" data-tab="countries">Countries</button>
+        <button type="button" role="tab" data-tab="visitors">Visitors</button>
+      </div>
+    </div>
+    <div class="rank" id="top-list"><span class="empty">Waiting for traffic…</span></div>
   </section>
 
-  <section class="glass card" id="card-countries">
-    <div class="card-h"><span class="card-t">Top countries</span></div>
-    <div class="rank" id="country-list"><span class="empty">Waiting for traffic…</span></div>
+  <section class="glass card" id="card-bans" hidden>
+    <div class="card-h"><span class="card-t">🛡 CrowdSec</span><span class="card-s" id="bans-n">0 active</span></div>
+    <div class="ban-list" id="ban-list"></div>
   </section>
 </aside>
 
@@ -310,16 +406,41 @@
 </section>
 
 <footer id="timeline" class="glass">
-  <span class="tl-lab" id="tl-label-left">7d ago</span>
-  <div id="tl-track-wrap" tabindex="0" role="slider" aria-label="History timeline: arrow keys pick a period, End returns to live" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="Live">
+  <button id="tl-play" class="tl-btn" type="button" aria-label="Play the period">
+    <svg class="ic-play" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.5-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>
+    <svg class="ic-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.2"/><rect x="14" y="4" width="5" height="16" rx="1.2"/></svg>
+  </button>
+  <div id="tl-periods" class="tl-seg" role="group" aria-label="Period shown">
+    <button type="button" data-period="1h" title="Last hour">1h</button>
+    <button type="button" data-period="6h" title="Last 6 hours">6h</button>
+    <button type="button" data-period="24h" title="Last 24 hours">24h</button>
+    <button type="button" data-period="7d" title="Last 7 days">7d</button>
+  </div>
+  <span class="tl-lab" id="tl-label-left">24h ago</span>
+  <div id="tl-track-wrap" tabindex="0" role="slider" aria-label="Timeline: click to replay from there. Space plays or pauses, arrows step, End returns to live" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="Live">
     <div id="tl-density"></div>
     <div id="tl-track"><div id="tl-filled"></div></div>
     <div id="tl-cursor" class="live"></div>
+    <div id="tl-clock"></div>
     <div id="tl-tooltip"></div>
   </div>
   <span class="tl-lab">Now</span>
-  <button id="tl-live-pill" class="active"><i></i>Live</button>
+  <button id="tl-speed" class="tl-btn tl-speed" type="button">1 min/s</button>
+  <button id="tl-live-pill" class="active" type="button"><i></i>Live</button>
 </footer>
+
+<div id="globe-tip"></div>
+
+<aside id="detail-panel" class="glass" role="dialog" aria-label="Visitor details" aria-hidden="true">
+  <div class="dp-head">
+    <div class="dp-flag" id="dp-flag"></div>
+    <div style="min-width:0"><div id="dp-loc"></div><div class="dp-ip" id="dp-ip"></div></div>
+    <button class="icon-btn" id="dp-close" type="button" aria-label="Close details">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="dp-body" id="dp-body"></div>
+</aside>
 
 <div id="scrim"></div>
 <div id="settings-panel" class="glass" role="dialog" aria-label="Settings">
@@ -354,7 +475,12 @@
 
     <div class="sp-section">
       <div class="sp-label">History</div>
-      <div class="sp-help">Click or drag over the bars at the bottom to replay that period: the panels show its totals and its connections are animated. Arrow keys step through periods, <code>End</code> returns to live.</div>
+      <div class="sp-help">Pick a period at the bottom (1 hour to 7 days): the panels sum it up. Click the bars to replay from that moment, or press ▶ to play the whole period in about a minute. Quiet stretches are skipped, pausing freezes the arcs so you can click them, and playback returns to live when it catches up. Keys on the timeline: <code>Space</code> play/pause, arrows step, <code>End</code> live.</div>
+    </div>
+
+    <div class="sp-section">
+      <div class="sp-label">Details</div>
+      <div class="sp-help">Click an arc, a red ban dot, a feed card or a visitor in the Top list to see everything stored about that IP: network owner, first and last visit, services, latest requests and CrowdSec bans.</div>
     </div>
   </div>
   <div class="sp-foot">

@@ -4,7 +4,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'fs';
 import { dirname } from 'path';
-import type { Connection } from './types.js';
+import type { Connection, Proto } from './types.js';
 import { config } from './config.js';
 
 // ── Open & migrate ────────────────────────────
@@ -35,19 +35,43 @@ db.exec(`
   if (!cols.has('proto')) db.exec(`ALTER TABLE connections ADD COLUMN proto TEXT NOT NULL DEFAULT 'http'`);
   if (!cols.has('port'))  db.exec(`ALTER TABLE connections ADD COLUMN port INTEGER NOT NULL DEFAULT 0`);
   if (!cols.has('cc'))    db.exec(`ALTER TABLE connections ADD COLUMN cc TEXT NOT NULL DEFAULT ''`);
+  if (!cols.has('asn'))   db.exec(`ALTER TABLE connections ADD COLUMN asn INTEGER NOT NULL DEFAULT 0`);
+  if (!cols.has('org'))   db.exec(`ALTER TABLE connections ADD COLUMN org TEXT NOT NULL DEFAULT ''`);
+  if (!cols.has('blocked')) db.exec(`ALTER TABLE connections ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0`);
 }
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_ip_ts ON connections(ip, ts);
+
+  -- CrowdSec decisions. id is CrowdSec's decision id.
+  CREATE TABLE IF NOT EXISTS bans (
+    id        INTEGER PRIMARY KEY,
+    value     TEXT    NOT NULL,     -- IP or CIDR range
+    scope     TEXT    NOT NULL,     -- ip | range
+    scenario  TEXT    NOT NULL DEFAULT '',
+    origin    TEXT    NOT NULL DEFAULT '',
+    type      TEXT    NOT NULL DEFAULT 'ban',
+    start     INTEGER NOT NULL,     -- when GlobeGate first saw it
+    until     INTEGER NOT NULL,     -- expiry, or when it was lifted
+    src_lat   REAL, src_lon REAL,
+    city      TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '', cc TEXT NOT NULL DEFAULT '',
+    asn       INTEGER NOT NULL DEFAULT 0, org TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_bans_start ON bans(start);
+  CREATE INDEX IF NOT EXISTS idx_bans_value ON bans(value);
+`);
 
 // ── Prepared statements ───────────────────────
 const stmtInsert = db.prepare<{
   ts: number; ip: string; router: string; status: number;
   method: string; path: string; color: string;
   src_lat: number; src_lon: number; city: string; country: string;
-  proto: string; port: number; cc: string;
+  proto: string; port: number; cc: string; asn: number; org: string; blocked: number;
 }>(`
   INSERT INTO connections
-    (ts, ip, router, status, method, path, color, src_lat, src_lon, city, country, proto, port, cc)
+    (ts, ip, router, status, method, path, color, src_lat, src_lon, city, country, proto, port, cc, asn, org, blocked)
   VALUES
-    (@ts, @ip, @router, @status, @method, @path, @color, @src_lat, @src_lon, @city, @country, @proto, @port, @cc)
+    (@ts, @ip, @router, @status, @method, @path, @color, @src_lat, @src_lon, @city, @country, @proto, @port, @cc, @asn, @org, @blocked)
 `);
 
 // Time windows are half-open: from <= ts < to
@@ -67,6 +91,8 @@ const stmtSample = db.prepare<[number, number, number, number]>(`
   LIMIT ?
 `);
 
+const stmtNext = db.prepare<[number]>('SELECT MIN(ts) AS t FROM connections WHERE ts >= ?');
+
 const stmtByRouter = db.prepare<[number, number]>(`
   SELECT router AS k, COUNT(*) AS n FROM connections
   WHERE ts >= ? AND ts < ? GROUP BY router ORDER BY n DESC LIMIT 20
@@ -82,6 +108,15 @@ const stmtByProto = db.prepare<[number, number]>(`
   WHERE ts >= ? AND ts < ? GROUP BY proto
 `);
 
+// Most active IPs, described by their latest connection in the window
+const stmtTopIps = db.prepare<[number, number, number]>(`
+  SELECT t.n, c.* FROM (
+    SELECT ip, COUNT(*) AS n, MAX(id) AS last FROM connections
+    WHERE ts >= ? AND ts < ? GROUP BY ip ORDER BY n DESC LIMIT ?
+  ) t JOIN connections c ON c.id = t.last
+  ORDER BY t.n DESC
+`);
+
 const stmtDensity = db.prepare<{ from: number; to: number; buckets: number }>(`
   SELECT CAST((ts - @from) * @buckets / (@to - @from) AS INTEGER) AS b, COUNT(*) AS n
   FROM connections WHERE ts >= @from AND ts < @to GROUP BY b
@@ -91,12 +126,63 @@ const stmtOldest = db.prepare<[]>('SELECT MIN(ts) AS t FROM connections');
 
 const stmtPrune = db.prepare<[number]>('DELETE FROM connections WHERE ts < ?');
 
+// ── Visitor (one IP) ──
+const stmtIpOfConnection = db.prepare<[number]>('SELECT ip FROM connections WHERE id = ?');
+const stmtVisitorSummary = db.prepare<[string]>(
+  'SELECT COUNT(*) AS n, MIN(ts) AS first, MAX(ts) AS last FROM connections WHERE ip = ?',
+);
+const stmtVisitorRouters = db.prepare<[string]>(`
+  SELECT router AS k, COUNT(*) AS n FROM connections WHERE ip = ? GROUP BY router ORDER BY n DESC LIMIT 12
+`);
+const stmtVisitorStatus = db.prepare<[string]>(`
+  SELECT status AS k, COUNT(*) AS n FROM connections WHERE ip = ? AND proto = 'http' GROUP BY status ORDER BY n DESC
+`);
+const stmtVisitorPorts = db.prepare<[string]>(`
+  SELECT proto, port, COUNT(*) AS n FROM connections WHERE ip = ? AND proto != 'http'
+  GROUP BY proto, port ORDER BY n DESC LIMIT 12
+`);
+const stmtVisitorActivity = db.prepare<{ ip: string; from: number; to: number; buckets: number }>(`
+  SELECT CAST((ts - @from) * @buckets / (@to - @from) AS INTEGER) AS b, COUNT(*) AS n
+  FROM connections WHERE ip = @ip AND ts >= @from AND ts < @to GROUP BY b
+`);
+const stmtVisitorRecent = db.prepare<[string, number]>(
+  'SELECT * FROM connections WHERE ip = ? ORDER BY ts DESC LIMIT ?',
+);
+
+// ── Bans ──
+const stmtUpsertBan = db.prepare<BanRow>(`
+  INSERT INTO bans (id, value, scope, scenario, origin, type, start, until, src_lat, src_lon, city, country, cc, asn, org)
+  VALUES (@id, @value, @scope, @scenario, @origin, @type, @start, @until, @src_lat, @src_lon, @city, @country, @cc, @asn, @org)
+  ON CONFLICT(id) DO UPDATE SET
+    -- the same decision seen again keeps its start; a reused id is a new decision
+    start = CASE WHEN bans.value = excluded.value THEN bans.start ELSE excluded.start END,
+    value = excluded.value, scope = excluded.scope, scenario = excluded.scenario,
+    origin = excluded.origin, type = excluded.type, until = excluded.until,
+    src_lat = excluded.src_lat, src_lon = excluded.src_lon, city = excluded.city,
+    country = excluded.country, cc = excluded.cc, asn = excluded.asn, org = excluded.org
+`);
+const stmtGetBan     = db.prepare<[number]>('SELECT * FROM bans WHERE id = ?');
+const stmtEndBan     = db.prepare<[number, number]>('UPDATE bans SET until = MIN(until, ?) WHERE id = ?');
+const stmtActiveBans = db.prepare<[number, number]>('SELECT * FROM bans WHERE until > ? ORDER BY start DESC LIMIT ?');
+const stmtBansWindow = db.prepare<[number, number, number]>(
+  'SELECT * FROM bans WHERE start < ? AND until > ? ORDER BY start LIMIT ?',
+);
+const stmtBansForIp  = db.prepare<[string]>('SELECT * FROM bans WHERE value = ? ORDER BY start DESC LIMIT 20');
+const stmtRangeBans  = db.prepare<[]>(`SELECT * FROM bans WHERE scope = 'range' ORDER BY start DESC LIMIT 500`);
+const stmtPruneBans  = db.prepare<[number]>('DELETE FROM bans WHERE until < ?');
+
 // ── Row → Connection mapping ──────────────────
 interface DbRow {
   id: number; ts: number; ip: string; router: string; status: number;
   method: string; path: string; color: string;
   src_lat: number; src_lon: number; city: string; country: string;
-  proto: string; port: number; cc: string;
+  proto: string; port: number; cc: string; asn: number; org: string; blocked: number;
+}
+
+export interface BanRow {
+  id: number; value: string; scope: 'ip' | 'range'; scenario: string; origin: string; type: string;
+  start: number; until: number; src_lat: number | null; src_lon: number | null;
+  city: string; country: string; cc: string; asn: number; org: string;
 }
 
 function rowToConnection(r: DbRow): Connection {
@@ -115,13 +201,17 @@ function rowToConnection(r: DbRow): Connection {
     city:      r.city,
     country:   r.country,
     countryCode: r.cc ?? '',
+    asn:       r.asn ?? 0,
+    org:       r.org ?? '',
+    blocked:   !!r.blocked,
     timestamp: new Date(r.ts).toISOString(),
   };
 }
 
 // ── Public API ────────────────────────────────
-export function insertConnection(conn: Connection): void {
-  stmtInsert.run({
+/** Store a connection. Returns its row id. */
+export function insertConnection(conn: Connection): number {
+  const r = stmtInsert.run({
     ts:      new Date(conn.timestamp).getTime(),
     ip:      conn.ip,
     router:  conn.router,
@@ -136,7 +226,11 @@ export function insertConnection(conn: Connection): void {
     proto:   conn.proto,
     port:    conn.port,
     cc:      conn.countryCode,
+    asn:     conn.asn,
+    org:     conn.org,
+    blocked: conn.blocked ? 1 : 0,
   });
+  return Number(r.lastInsertRowid);
 }
 
 export interface WindowSummary {
@@ -144,22 +238,32 @@ export interface WindowSummary {
   byRouter:  Record<string, number>;
   byCountry: { country: string; cc: string; n: number }[];
   byProto:   Record<string, number>;
+  topIps:    (Connection & { n: number })[];
 }
 
-/**
- * A time window for replay: up to `limit` rows spread evenly over the whole
- * window (oldest first), plus exact totals for everything in it.
- */
-export function queryWindow(fromMs: number, toMs: number, limit: number): { rows: Connection[] } & WindowSummary {
+/** Totals of a time window: what the side panels show. */
+export function querySummary(fromMs: number, toMs: number, topIps = 5): WindowSummary {
   const total = (stmtCount.get(fromMs, toMs) as { n: number }).n;
-  const step  = Math.max(1, Math.ceil(total / Math.max(1, limit)));
-  const rows  = (stmtSample.all(fromMs, toMs, step, limit) as DbRow[]).map(rowToConnection);
   const byRouter: Record<string, number> = {};
   for (const r of stmtByRouter.all(fromMs, toMs) as { k: string; n: number }[]) byRouter[r.k] = r.n;
   const byProto: Record<string, number> = {};
   for (const r of stmtByProto.all(fromMs, toMs) as { k: string; n: number }[]) byProto[r.k || 'http'] = r.n;
   const byCountry = stmtByCountry.all(fromMs, toMs) as { country: string; cc: string; n: number }[];
-  return { rows, total, byRouter, byCountry, byProto };
+  const top = (stmtTopIps.all(fromMs, toMs, topIps) as (DbRow & { n: number })[]).map(r => ({ ...rowToConnection(r), n: r.n }));
+  return { total, byRouter, byCountry, byProto, topIps: top };
+}
+
+/**
+ * Connections to play back: up to `limit` rows spread evenly over the whole
+ * window (oldest first), how many there are in total, and when the next one
+ * after the window happened (so playback can skip quiet periods).
+ */
+export function queryWindow(fromMs: number, toMs: number, limit: number): { rows: Connection[]; total: number; next: number | null } {
+  const total = (stmtCount.get(fromMs, toMs) as { n: number }).n;
+  const step  = Math.max(1, Math.ceil(total / Math.max(1, limit)));
+  const rows  = limit > 0 ? (stmtSample.all(fromMs, toMs, step, limit) as DbRow[]).map(rowToConnection) : [];
+  const next  = (stmtNext.get(toMs) as { t: number | null }).t;
+  return { rows, total, next };
 }
 
 export const MAX_DENSITY_BUCKETS = 200;
@@ -184,8 +288,64 @@ export function queryOldest(): number {
 
 export function pruneOldRows(): number {
   const cutoff = Date.now() - config.retentionMs;
-  const result = stmtPrune.run(cutoff);
-  return result.changes;
+  stmtPruneBans.run(cutoff);
+  return stmtPrune.run(cutoff).changes;
+}
+
+// ── Visitor ───────────────────────────────────
+export const VISITOR_BUCKETS = 56; // 3-hour bars over 7 days
+
+/** The IP behind a stored connection, or null. */
+export function ipOfConnection(id: number): string | null {
+  return (stmtIpOfConnection.get(id) as { ip: string } | undefined)?.ip ?? null;
+}
+
+export interface VisitorRows {
+  total: number; firstSeen: number; lastSeen: number;
+  byRouter: Record<string, number>;
+  byStatus: Record<string, number>;
+  byPort:   { proto: Proto; port: number; n: number }[];
+  activity: { from: number; to: number; buckets: number[] };
+  recent:   Connection[];
+}
+
+/** Everything stored about one IP. */
+export function queryVisitor(ip: string, now = Date.now()): VisitorRows {
+  const sum = stmtVisitorSummary.get(ip) as { n: number; first: number | null; last: number | null };
+  const byRouter: Record<string, number> = {};
+  for (const r of stmtVisitorRouters.all(ip) as { k: string; n: number }[]) byRouter[r.k] = r.n;
+  const byStatus: Record<string, number> = {};
+  for (const r of stmtVisitorStatus.all(ip) as { k: number; n: number }[]) byStatus[String(r.k)] = r.n;
+  const byPort = stmtVisitorPorts.all(ip) as { proto: Proto; port: number; n: number }[];
+
+  const to = now + 1; // windows are half-open: include connections stamped right now
+  const from = to - config.retentionMs;
+  const buckets = new Array<number>(VISITOR_BUCKETS).fill(0);
+  for (const { b, n } of stmtVisitorActivity.all({ ip, from, to, buckets: VISITOR_BUCKETS }) as { b: number; n: number }[]) {
+    if (b >= 0 && b < VISITOR_BUCKETS) buckets[b] = n;
+  }
+  const recent = (stmtVisitorRecent.all(ip, 25) as DbRow[]).map(rowToConnection);
+  return {
+    total: sum.n, firstSeen: sum.first ?? 0, lastSeen: sum.last ?? 0,
+    byRouter, byStatus, byPort, activity: { from, to, buckets }, recent,
+  };
+}
+
+// ── Bans ──────────────────────────────────────
+export function upsertBan(b: BanRow): void { stmtUpsertBan.run(b); }
+export function getBan(id: number): BanRow | null { return (stmtGetBan.get(id) as BanRow | undefined) ?? null; }
+/** Mark a decision as lifted at `at` (keeps an earlier expiry). */
+export function endBan(id: number, at: number): void { stmtEndBan.run(at, id); }
+export function queryActiveBans(now = Date.now(), limit = 1_000): BanRow[] {
+  return stmtActiveBans.all(now, limit) as BanRow[];
+}
+/** Decisions active at some point in [from, to), oldest first. */
+export function queryBansInWindow(fromMs: number, toMs: number, limit = 200): BanRow[] {
+  return stmtBansWindow.all(toMs, fromMs, limit) as BanRow[]; // start < to AND until > from
+}
+/** Decisions against exactly this IP, plus range decisions (filtered by the caller). */
+export function queryBansForIp(ip: string): { exact: BanRow[]; ranges: BanRow[] } {
+  return { exact: stmtBansForIp.all(ip) as BanRow[], ranges: stmtRangeBans.all() as BanRow[] };
 }
 
 export function closeDb(): void {
