@@ -119,10 +119,16 @@ export function queryHistory(fromMs: number, toMs: number, limit = 200): Connect
   return (stmtSelectWindow.all(fromMs, toMs, limit) as DbRow[]).map(rowToConnection);
 }
 
+export const MAX_DENSITY_BUCKETS = 200;
+
 export function queryDensity(fromMs: number, toMs: number, buckets: number): number[] {
-  const rows = stmtSelectAllTs.all(fromMs, toMs) as { ts: number }[];
+  if (!Number.isInteger(buckets) || buckets < 1 || buckets > MAX_DENSITY_BUCKETS) {
+    throw new RangeError(`buckets must be an integer between 1 and ${MAX_DENSITY_BUCKETS}`);
+  }
   const counts = new Array<number>(buckets).fill(0);
   const span = toMs - fromMs;
+  if (!(span > 0)) return counts;
+  const rows = stmtSelectAllTs.all(fromMs, toMs) as { ts: number }[];
   for (const { ts } of rows) {
     const idx = Math.min(buckets - 1, Math.floor((ts - fromMs) / span * buckets));
     counts[idx]++;

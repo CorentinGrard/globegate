@@ -33,5 +33,6 @@ First public release.
 - The automatic GeoIP download never worked in the container (`curl` was missing from the image).
 - Real traffic was shown at random cities when the GeoIP database was missing; it is now skipped until the database is available.
 - Traefik logs with kept headers (`request_X-Forwarded-For`, `request_Cf-Connecting-Ip`) are now read correctly.
-- Log fields are escaped before being displayed.
+- Log fields are escaped before being displayed, and feed cards are built without `innerHTML`.
+- `/api/density` validates the bucket count itself (CodeQL `js/resource-exhaustion`).
 - Local `docker build` copied host `node_modules` into the image.
