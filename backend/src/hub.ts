@@ -9,16 +9,24 @@ import { geolocate, hasGeoIP } from './geo.js';
 import { getServiceColor, SERVICE_COLORS } from './colors.js';
 import { insertConnection, queryOldest } from './db.js';
 import { createIpMatcher, isPrivateIP, maskIp, normalizeIp } from './ip.js';
+import { createPathMatcher, HostIpSet, redactPath } from './filters.js';
 import type { Connection, GeoResult, InitPayload, ParsedLine, SourceName, WsMessage } from './types.js';
 
 const MAX_RECENT = 300;
 
-const isIgnored = createIpMatcher(config.ignoreIps, e => console.warn(`⚠️  IGNORE_IPS: skipping invalid entry "${e}"`));
+const isIgnored     = createIpMatcher(config.ignoreIps, e => console.warn(`⚠️  IGNORE_IPS: skipping invalid entry "${e}"`));
+const isIgnoredPath = createPathMatcher(config.ignorePaths);
+const ownIps        = new HostIpSet(config.ignoreHosts);
+ownIps.start();
 
-/** What viewers are allowed to see of a connection, according to IP_DISPLAY. */
+/**
+ * What viewers are allowed to see of a connection: IPs per IP_DISPLAY, and
+ * token-like path segments masked (also covers rows stored by older versions).
+ */
 export function toPublic(c: Connection): Connection {
-  if (config.ipDisplay === 'full') return c;
-  return { ...c, ip: config.ipDisplay === 'masked' ? maskIp(c.ip) : '' };
+  const path = redactPath(c.path);
+  const ip = config.ipDisplay === 'full' ? c.ip : config.ipDisplay === 'masked' ? maskIp(c.ip) : '';
+  return ip === c.ip && path === c.path ? c : { ...c, ip, path };
 }
 
 export class Hub {
@@ -44,7 +52,8 @@ export class Hub {
   /** Ingest one event. `geo` overrides the GeoIP lookup (used by demo mode). */
   ingest(line: ParsedLine, geo?: GeoResult): Connection | null {
     const ip = normalizeIp(line.ip);
-    if (isPrivateIP(ip) || isIgnored(ip)) return null;
+    if (isPrivateIP(ip) || isIgnored(ip) || ownIps.has(ip)) return null;
+    if (line.proto === 'http' && isIgnoredPath(line.path)) return null;
 
     const loc = geo ?? geolocate(ip);
     if (!loc) {

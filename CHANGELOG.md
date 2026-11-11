@@ -13,6 +13,8 @@ First public release.
 - **Every inbound TCP/UDP connection**, not just HTTP: SSH, VPNs, game servers… read from the Linux connection-tracking table (`conntrack`). Works behind NAT and double NAT with port forwarding. Configure with `CONNTRACK*` variables.
 - Protocol filter (All / HTTP / TCP / UDP), top countries panel and country flags in the feed.
 - Privacy controls: `IP_DISPLAY` (`masked` by default, `full` or `hidden`) and `IGNORE_IPS` to drop addresses or ranges before they are stored.
+- `IGNORE_HOSTS` hides your own traffic coming back through the router (NAT loopback), following your public IP through DNS; `IGNORE_PATHS` hides health-check endpoints.
+- Token-like path segments (webhook IDs, invite links, UUIDs) are masked before being stored or shown.
 - `RETENTION_DAYS` to choose how long history is kept (default 7).
 - `MAXMIND_ACCOUNT_ID` to use MaxMind's current authenticated download endpoint.
 - `DEMO` to force or disable demo mode.

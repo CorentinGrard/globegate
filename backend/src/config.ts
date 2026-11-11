@@ -88,6 +88,11 @@ export const config = {
   ipDisplay:   oneOf('IP_DISPLAY', ['full', 'masked', 'hidden'] as const, 'masked'),
   // IPs / CIDR ranges that are dropped before anything is stored or shown
   ignoreIps:   parseList(env('IGNORE_IPS')),
+  // Hostnames whose current IPs are dropped — e.g. your own domain, to hide
+  // traffic that loops back through the router (health checks, apps on Wi-Fi)
+  ignoreHosts: parseList(env('IGNORE_HOSTS')),
+  // HTTP path prefixes that are dropped, e.g. health-check endpoints
+  ignorePaths: parseList(env('IGNORE_PATHS')),
 
   // ── Raw TCP/UDP connections via Linux conntrack ──
   // auto = enable when conntrack works (needs host network + NET_ADMIN)

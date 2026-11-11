@@ -40,3 +40,8 @@ test('rejects non-JSON and lines without a client address', () => {
   assert.equal(parseLogLine('{not json'), null);
   assert.equal(parseLogLine(JSON.stringify({ RouterName: 'x' })), null);
 });
+
+test('masks webhook ids and other tokens in paths', () => {
+  const p = parseLogLine(JSON.stringify({ ...base, RequestPath: '/api/webhook/71b3239e3b94636d519645d556a788f683128c4842445df3bbbeabb67d5e503d' }));
+  assert.equal(p?.path, '/api/webhook/•••');
+});
