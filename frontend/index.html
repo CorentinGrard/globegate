@@ -147,6 +147,10 @@
   #tl-density { position:absolute; left:0; right:0; bottom:9px; height:30px; display:flex; align-items:flex-end; gap:2px; }
   .tl-bar { flex:1; min-height:2px; border-radius:2px 2px 0 0; background:linear-gradient(to top, rgba(124,156,255,.15), rgba(124,156,255,.55)); transition:height .4s ease; }
   .tl-bar.past { background:linear-gradient(to top, rgba(124,156,255,.25), rgba(124,156,255,.85)); }
+  .tl-bar.empty { opacity:.35; }
+  .tl-bar.sel { background:linear-gradient(to top, rgba(251,191,36,.3), var(--warn)); opacity:1; box-shadow:0 0 10px rgba(251,191,36,.45); }
+  #tl-track-wrap:focus-visible { outline:2px solid var(--accent); outline-offset:6px; border-radius:6px; }
+  #tl-cursor:not(.live) { border-color:var(--warn); box-shadow:0 0 0 4px rgba(251,191,36,.2), 0 2px 10px rgba(0,0,0,.5); }
   #tl-track { position:relative; height:3px; border-radius:3px; background:rgba(255,255,255,.07); margin-bottom:3px; }
   #tl-filled { height:100%; border-radius:3px; background:linear-gradient(90deg, rgba(124,156,255,.2), var(--accent)); }
   #tl-cursor { position:absolute; bottom:-1.5px; width:14px; height:14px; transform:translate(-50%, 50%); margin-bottom:3px; border-radius:50%; background:#fff; border:3px solid var(--accent); box-shadow:0 0 0 4px rgba(124,156,255,.2), 0 2px 10px rgba(0,0,0,.5); cursor:grab; z-index:2; }
@@ -307,7 +311,7 @@
 
 <footer id="timeline" class="glass">
   <span class="tl-lab" id="tl-label-left">7d ago</span>
-  <div id="tl-track-wrap">
+  <div id="tl-track-wrap" tabindex="0" role="slider" aria-label="History timeline: arrow keys pick a period, End returns to live" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100" aria-valuetext="Live">
     <div id="tl-density"></div>
     <div id="tl-track"><div id="tl-filled"></div></div>
     <div id="tl-cursor" class="live"></div>
@@ -350,7 +354,7 @@
 
     <div class="sp-section">
       <div class="sp-label">History</div>
-      <div class="sp-help">Drag the timeline at the bottom to replay any 5-minute window of the stored history.</div>
+      <div class="sp-help">Click or drag over the bars at the bottom to replay that period: the panels show its totals and its connections are animated. Arrow keys step through periods, <code>End</code> returns to live.</div>
     </div>
   </div>
   <div class="sp-foot">

@@ -61,6 +61,16 @@ export interface InitPayload {
   ipDisplay:         'full' | 'masked' | 'hidden';
 }
 
+/** GET /api/history — a replay window: evenly sampled rows + exact totals */
+export interface HistoryResponse {
+  rows:      Connection[];
+  total:     number;
+  byRouter:  Record<string, number>;
+  byCountry: { country: string; cc: string; n: number }[];
+  byProto:   Record<string, number>;
+  oldest:    number;
+}
+
 export type WsMessage =
   | { type: 'init';       data: InitPayload }
   | { type: 'connection'; data: Connection }

@@ -1,242 +1,283 @@
 // ─────────────────────────────────────────────
-//  Timeline — scrubber bar + history playback
+//  Timeline — density bars + history replay
 // ─────────────────────────────────────────────
+//  The stored history is split into equal slices ("bars"). Clicking, dragging
+//  or arrow-keying onto a bar replays exactly that slice: the panels show its
+//  real totals, and an even sample of its connections is animated.
 import { spawnArc, clearAllArcs, isVisible } from './arcs.js';
 import { addFeedItem, removeFeedItem, clearFeed, setFeedTitle } from './feed.js';
-import {
-  resetStats, recordConnection, recordRouter,
-  setHistoryMode, updateCounters, updateServices,
-} from './stats.js';
+import { showHistoryTotals, showLiveTotals, updateCounters, updateServices } from './stats.js';
 import { setHistoryLabel } from './status.js';
-import type { Connection } from './types.js';
+import type { HistoryResponse } from './types.js';
+
+const PLAYBACK_MS  = 6_000;  // a replayed slice is animated over this long
+const REPLAY_ROWS  = 150;    // connections animated per replay (totals are exact)
+const LIVE_ZONE    = 0.99;   // cursor beyond this fraction = live
 
 // ── State ─────────────────────────────────────
-const TL_WINDOW  = 7 * 24 * 3_600_000;
-const TL_BUCKETS = 80;
-const PLAYBACK_MS = 4_000; // replay 5-min window over this duration
+let dbOldest = Date.now();
+let range = { from: Date.now() - 3_600_000, to: Date.now() };  // what the bars cover
+let counts: number[] = [];
+let selected: number | null = null;   // bar being replayed, null = live
+let cursorFrac = 1;
+let dragging = false;
+let dragTimer = 0;
 
-export let dbOldest = Date.now() - TL_WINDOW;
+// Every replay gets a new generation; timers of older generations do nothing
+let generation = 0;
+let timers: number[] = [];
+
+export function isHistoryMode(): boolean { return selected !== null; }
 export function setDbOldest(ts: number): void { dbOldest = ts; }
 
-let tlCursorFrac  = 1.0;
-let tlDragging    = false;
-let tlDebounce    = 0;
-let historyLoading = false;
-let historyMode    = false;
-
-export function isHistoryMode(): boolean { return historyMode; }
-
-// ── DOM refs ──────────────────────────────────
-const tlTrackWrap = document.getElementById('tl-track-wrap')!;
-const tlCursor    = document.getElementById('tl-cursor')!;
-const tlFilled    = document.getElementById('tl-filled')!;
-const tlTooltip   = document.getElementById('tl-tooltip')!;
-const tlLivePill  = document.getElementById('tl-live-pill')!;
-const tlLabelLeft = document.getElementById('tl-label-left')!;
-const tlDensityEl = document.getElementById('tl-density')!;
+// ── DOM ───────────────────────────────────────
+const wrap      = document.getElementById('tl-track-wrap')!;
+const cursorEl  = document.getElementById('tl-cursor')!;
+const filledEl  = document.getElementById('tl-filled')!;
+const tooltip   = document.getElementById('tl-tooltip')!;
+const livePill  = document.getElementById('tl-live-pill')!;
+const leftLabel = document.getElementById('tl-label-left')!;
+const barsEl    = document.getElementById('tl-density')!;
 
 // ── Helpers ───────────────────────────────────
-function tlFracToTs(frac: number): number {
-  return dbOldest + frac * (Date.now() - dbOldest);
+const bucketMs = (): number => (range.to - range.from) / Math.max(1, counts.length);
+
+function bucketRange(i: number): { from: number; to: number } {
+  const w = bucketMs();
+  return { from: Math.round(range.from + i * w), to: Math.round(range.from + (i + 1) * w) };
 }
 
-function tlFracFromEvent(e: MouseEvent | TouchEvent): number {
-  const rect  = tlTrackWrap.getBoundingClientRect();
-  const clientX = 'touches' in e ? e.touches[0]!.clientX : e.clientX;
-  return Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+function bucketAt(frac: number): number {
+  return Math.max(0, Math.min(counts.length - 1, Math.floor(frac * counts.length)));
 }
 
-function formatTlTs(ms: number): string {
+function fracFromEvent(e: MouseEvent | TouchEvent): number {
+  const rect = wrap.getBoundingClientRect();
+  const x = 'touches' in e ? (e.touches[0] ?? e.changedTouches[0])!.clientX : e.clientX;
+  return Math.max(0, Math.min(1, (x - rect.left) / rect.width));
+}
+
+function fmt(ms: number, withDay: boolean): string {
   const d = new Date(ms);
   const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  return d.toDateString() === new Date().toDateString()
-    ? time
-    : `${d.toLocaleDateString([], { weekday: 'short' })} ${time}`;
+  return withDay ? `${d.toLocaleDateString([], { weekday: 'short' })} ${time}` : time;
 }
 
+function fmtRange(from: number, to: number): string {
+  const today = new Date().toDateString();
+  const sameDay = new Date(from).toDateString() === new Date(to).toDateString();
+  const day = new Date(from).toDateString() !== today;
+  return sameDay ? `${fmt(from, day)}–${fmt(to, false)}` : `${fmt(from, true)} – ${fmt(to, true)}`;
+}
+
+function describe(frac: number): string {
+  if (frac >= LIVE_ZONE || !counts.length) return 'Live';
+  const i = bucketAt(frac);
+  const r = bucketRange(i);
+  const n = counts[i] ?? 0;
+  return `${fmtRange(r.from, r.to)} · ${n ? `${n.toLocaleString()} connection${n > 1 ? 's' : ''}` : 'no connections'}`;
+}
+
+// ── Cursor, tooltip, labels ───────────────────
+function setCursor(frac: number, animate = false): void {
+  cursorFrac = Math.max(0, Math.min(1, frac));
+  if (animate) {
+    cursorEl.style.transition = 'left .3s ease';
+    filledEl.style.transition = 'width .3s ease';
+    setTimeout(() => { cursorEl.style.transition = ''; filledEl.style.transition = ''; }, 350);
+  }
+  cursorEl.style.left   = `${cursorFrac * 100}%`;
+  filledEl.style.width  = `${cursorFrac * 100}%`;
+  const live = selected === null;
+  cursorEl.classList.toggle('live', live);
+  livePill.classList.toggle('active', live);
+  wrap.setAttribute('aria-valuenow', String(Math.round(cursorFrac * 100)));
+  wrap.setAttribute('aria-valuetext', live ? 'Live' : describe(cursorFrac));
+  markBars();
+}
+
+function showTooltip(frac: number): void {
+  tooltip.style.left = `${frac * 100}%`;
+  tooltip.textContent = describe(frac);
+  tooltip.classList.add('show');
+}
+
+function markBars(): void {
+  const bars = barsEl.children;
+  for (let i = 0; i < bars.length; i++) {
+    bars[i]!.classList.toggle('past', (i + 0.5) / bars.length <= cursorFrac);
+    bars[i]!.classList.toggle('sel', i === selected);
+  }
+}
+
+/** Kept for ws.ts: position the cursor without changing the mode. */
+export function updateTlCursor(frac: number): void { setCursor(frac); }
+
 export function updateTlLabel(): void {
-  const span  = Date.now() - dbOldest;
-  const hours = span / 3_600_000;
-  tlLabelLeft.textContent = hours < 1 ? `${Math.max(1, Math.round(hours * 60))}m ago`
+  const hours = (Date.now() - range.from) / 3_600_000;
+  leftLabel.textContent = hours < 1 ? `${Math.max(1, Math.round(hours * 60))}m ago`
     : hours < 24 ? `${Math.round(hours)}h ago` : `${Math.round(hours / 24)}d ago`;
 }
 
-export function updateTlCursor(frac: number, animate = false): void {
-  tlCursorFrac = Math.max(0, Math.min(1, frac));
-  const pct    = tlCursorFrac * 100;
-  if (animate) {
-    tlCursor.style.transition = 'left 0.3s ease';
-    setTimeout(() => { tlCursor.style.transition = ''; }, 350);
-  }
-  tlCursor.style.left  = `${pct}%`;
-  tlFilled.style.width = `${pct}%`;
-  const isLive = tlCursorFrac >= 0.995;
-  tlCursor.classList.toggle('live', isLive);
-  tlLivePill.classList.toggle('active', isLive);
-  markPastBars();
+// ── Density bars ──────────────────────────────
+function barCount(): number {
+  // ~1 bar per 14 px of track: readable on phones, detailed on wide screens
+  return Math.max(24, Math.min(120, Math.round(wrap.getBoundingClientRect().width / 14)));
 }
 
-function markPastBars(): void {
-  const bars = tlDensityEl.children;
-  for (let i = 0; i < bars.length; i++) {
-    bars[i]!.classList.toggle('past', (i + 0.5) / bars.length <= tlCursorFrac);
-  }
-}
-
-// ── Density sparkline ─────────────────────────
 export async function loadDensity(): Promise<void> {
+  if (isHistoryMode()) return; // keep the bars stable while a slice is replayed
+  const from = Math.min(dbOldest, Date.now() - 60_000);
+  const to = Date.now();
+  const n = barCount();
   try {
-    const r    = await fetch(`/api/density?from=${dbOldest}&to=${Date.now()}&buckets=${TL_BUCKETS}`);
+    const r = await fetch(`/api/density?from=${from}&to=${to}&buckets=${n}`);
     const data = await r.json() as { buckets: number[] };
-    renderDensity(data.buckets);
-  } catch { /* non-fatal */ }
+    if (isHistoryMode()) return;
+    range = { from, to };
+    counts = data.buckets;
+    renderBars();
+    updateTlLabel();
+  } catch { /* non-fatal: bars stay as they are */ }
 }
 
-function renderDensity(buckets: number[]): void {
-  if (!buckets.length) return;
-  const max = Math.max(...buckets, 1);
-  tlDensityEl.innerHTML = buckets
-    .map(v => `<div class="tl-bar" style="height:${Math.max(Math.round(v / max * 100), 2)}%"></div>`)
-    .join('');
-  markPastBars();
+function renderBars(): void {
+  const max = Math.max(...counts, 1);
+  barsEl.replaceChildren(...counts.map(v => {
+    const bar = document.createElement('div');
+    bar.className = 'tl-bar';
+    bar.style.height = `${Math.max(Math.round(v / max * 100), 3)}%`;
+    if (!v) bar.classList.add('empty');
+    return bar;
+  }));
+  markBars();
 }
 
-// ── History playback ──────────────────────────
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = window.setTimeout(() => void loadDensity(), 500);
+});
+
+// ── Replay ────────────────────────────────────
+function cancelReplay(): void {
+  generation++;
+  timers.forEach(t => clearTimeout(t));
+  timers = [];
+  clearAllArcs();
+  clearFeed();
+}
+
 export function returnToLive(): void {
-  historyLoading = false;
-  historyMode    = false;
-  setHistoryMode(false);
+  if (!isHistoryMode()) return;
+  cancelReplay();
+  selected = null;
+  showLiveTotals();
   setHistoryLabel(null);
   setFeedTitle('Live feed');
-  clearAllArcs();
-  resetStats();
-  clearFeed();
   updateCounters();
   updateServices();
+  setCursor(1, true);
 }
 
-async function loadHistory(fromMs: number, toMs: number): Promise<void> {
-  // Cancel any in-flight playback
-  historyLoading = false;
-  await Promise.resolve(); // yield so pending setTimeouts can observe the flag
+async function replayBucket(i: number): Promise<void> {
+  if (i === selected) return;
+  cancelReplay();
+  const gen = generation;
+  selected = i;
+  const { from, to } = bucketRange(i);
+  setCursor((i + 0.5) / counts.length, true);
+  setHistoryLabel(`History · ${fmtRange(from, to)}`);
+  setFeedTitle(`Replay ${fmtRange(from, to)}`);
 
-  historyLoading = true;
-  historyMode    = true;
-  setHistoryMode(true);
-  setHistoryLabel(`History · ${formatTlTs((fromMs + toMs) / 2)}`);
-  setFeedTitle(`Replay ${formatTlTs(fromMs)} → ${formatTlTs(toMs)}`);
-
-  clearAllArcs();
-  resetStats();
-  clearFeed();
-
-  let rows: Connection[];
+  let data: HistoryResponse;
   try {
-    const r  = await fetch(`/api/history?from=${fromMs}&to=${toMs}&limit=120`);
-    const js = await r.json() as { rows: Connection[] };
-    rows = js.rows ?? [];
+    const r = await fetch(`/api/history?from=${from}&to=${to}&limit=${REPLAY_ROWS}`);
+    data = await r.json() as HistoryResponse;
   } catch (e) {
-    console.error('History fetch error:', e);
-    historyLoading = false;
+    console.error('History fetch failed:', e);
+    if (gen === generation) setFeedTitle('Replay failed — try again');
     return;
   }
+  if (gen !== generation) return; // another slice was picked meanwhile
 
-  if (!historyLoading) return; // aborted while fetching
+  showHistoryTotals(data);
+  updateCounters();
+  updateServices();
 
-  // Sort oldest-first for chronological playback
-  rows.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  rows.forEach(c => { recordConnection(c); recordRouter(c.router); });
-  const filtered = rows.filter(isVisible);
-  if (!filtered.length) { historyLoading = false; updateCounters(); updateServices(); return; }
+  if (!data.total) { setFeedTitle(`No connections · ${fmtRange(from, to)}`); return; }
+  if (data.total > data.rows.length) {
+    setFeedTitle(`Replay ${fmtRange(from, to)} · ${data.rows.length} of ${data.total.toLocaleString()}`);
+  }
 
-  // Spread animations proportionally across PLAYBACK_MS
-  const t0   = new Date(filtered[0]!.timestamp).getTime();
-  const span = Math.max(new Date(filtered.at(-1)!.timestamp).getTime() - t0, 1);
-
-  filtered.forEach(c => {
-    const delay = Math.round((new Date(c.timestamp).getTime() - t0) / span * PLAYBACK_MS);
-    setTimeout(() => {
-      if (!historyLoading) return;
+  const rows = data.rows.filter(isVisible);
+  if (!rows.length) return;
+  const t0 = Date.parse(rows[0]!.timestamp);
+  const span = Math.max(Date.parse(rows.at(-1)!.timestamp) - t0, 1);
+  for (const c of rows) {
+    const delay = rows.length === 1 ? 0 : Math.round((Date.parse(c.timestamp) - t0) / span * PLAYBACK_MS);
+    timers.push(window.setTimeout(() => {
+      if (gen !== generation) return;
       const feedEl = addFeedItem(c);
       spawnArc(c, () => removeFeedItem(feedEl));
-      updateCounters();
-    }, delay);
-  });
-
-  setTimeout(() => {
-    if (!historyLoading) return;
-    updateServices();
-    historyLoading = false;
-  }, PLAYBACK_MS + 100);
-}
-
-async function applyTimeline(): Promise<void> {
-  if (tlCursorFrac >= 0.995) {
-    returnToLive();
-    return;
+    }, delay));
   }
-  const centre = tlFracToTs(tlCursorFrac);
-  const half   = 2.5 * 60_000; // ±2.5 min = 5-min window
-  await loadHistory(centre - half, centre + half);
 }
 
-// ── Event listeners ───────────────────────────
-tlTrackWrap.addEventListener('mousedown', e => {
-  tlDragging = true;
-  tlTooltip.classList.add('show');
-  updateTlCursor(tlFracFromEvent(e));
-});
+/** Act on a cursor position: replay the slice under it, or go live. */
+function apply(frac: number): void {
+  if (frac >= LIVE_ZONE || !counts.length) { returnToLive(); setCursor(1); return; }
+  void replayBucket(bucketAt(frac));
+}
 
-window.addEventListener('mousemove', e => {
-  if (!tlDragging) return;
-  updateTlCursor(tlFracFromEvent(e));
-  clearTimeout(tlDebounce);
-  tlDebounce = window.setTimeout(() => void applyTimeline(), 300);
-});
+// ── Mouse / touch ─────────────────────────────
+function startDrag(e: MouseEvent | TouchEvent): void {
+  dragging = true;
+  const f = fracFromEvent(e);
+  setCursor(f);
+  showTooltip(f);
+}
 
-window.addEventListener('mouseup', () => {
-  if (!tlDragging) return;
-  tlDragging = false;
-  tlTooltip.classList.remove('show');
-  clearTimeout(tlDebounce);
-  void applyTimeline();
-});
+function moveDrag(e: MouseEvent | TouchEvent): void {
+  if (!dragging) return;
+  const f = fracFromEvent(e);
+  setCursor(f);
+  showTooltip(f);
+  clearTimeout(dragTimer);
+  dragTimer = window.setTimeout(() => apply(f), 250);
+}
 
-tlTrackWrap.addEventListener('mousemove', e => {
-  if (tlDragging) return;
-  const frac = tlFracFromEvent(e);
-  tlTooltip.style.left  = `${frac * 100}%`;
-  tlTooltip.textContent = frac >= 0.995 ? 'Live' : formatTlTs(tlFracToTs(frac));
-  tlTooltip.classList.add('show');
-});
+function endDrag(): void {
+  if (!dragging) return;
+  dragging = false;
+  clearTimeout(dragTimer);
+  tooltip.classList.remove('show');
+  apply(cursorFrac);
+}
 
-tlTrackWrap.addEventListener('mouseleave', () => {
-  if (!tlDragging) tlTooltip.classList.remove('show');
-});
+wrap.addEventListener('mousedown', startDrag);
+window.addEventListener('mousemove', moveDrag);
+window.addEventListener('mouseup', endDrag);
+wrap.addEventListener('touchstart', e => { e.stopPropagation(); startDrag(e); }, { passive: true });
+window.addEventListener('touchmove', moveDrag, { passive: true });
+window.addEventListener('touchend', endDrag, { passive: true });
 
-tlTrackWrap.addEventListener('touchstart', e => {
-  e.stopPropagation();
-  tlDragging = true;
-  tlTooltip.classList.add('show');
-  updateTlCursor(tlFracFromEvent(e));
-}, { passive: true });
+wrap.addEventListener('mousemove', e => { if (!dragging) showTooltip(fracFromEvent(e)); });
+wrap.addEventListener('mouseleave', () => { if (!dragging) tooltip.classList.remove('show'); });
 
-window.addEventListener('touchmove', e => {
-  if (!tlDragging) return;
-  updateTlCursor(tlFracFromEvent(e));
-  clearTimeout(tlDebounce);
-  tlDebounce = window.setTimeout(() => void applyTimeline(), 400);
-}, { passive: true });
+livePill.addEventListener('click', () => returnToLive());
 
-window.addEventListener('touchend', () => {
-  if (!tlDragging) return;
-  tlDragging = false;
-  tlTooltip.classList.remove('show');
-  clearTimeout(tlDebounce);
-  void applyTimeline();
-}, { passive: true });
-
-tlLivePill.addEventListener('click', () => {
-  updateTlCursor(1.0, true);
-  void applyTimeline();
+// ── Keyboard ──────────────────────────────────
+wrap.addEventListener('keydown', e => {
+  if (!counts.length) return;
+  const last = counts.length - 1;
+  let target: number | 'live' | null = null;
+  if (e.key === 'ArrowLeft')  target = selected === null ? last : Math.max(0, selected - 1);
+  if (e.key === 'ArrowRight') target = selected === null ? null : selected >= last ? 'live' : selected + 1;
+  if (e.key === 'Home')       target = 0;
+  if (e.key === 'End' || e.key === 'Escape') target = 'live';
+  if (target === null) return;
+  e.preventDefault();
+  if (target === 'live') returnToLive();
+  else void replayBucket(target);
 });

@@ -45,9 +45,9 @@ function handleInit(data: InitPayload): void {
 }
 
 function handleConnection(c: Connection): void {
-  if (isHistoryMode()) return; // don't mix live traffic into a replay
   recordConnection(c);
   recordRouter(c.router);
+  if (isHistoryMode()) return; // counted, but not drawn over a replay
   updateCounters();
   if (!isVisible(c)) return;
   const feedEl = addFeedItem(c);
@@ -67,6 +67,6 @@ export function connect(): void {
     try { msg = JSON.parse(data as string) as WsMessage; } catch { return; }
     if (msg.type === 'init')       handleInit(msg.data);
     if (msg.type === 'connection') handleConnection(msg.data);
-    if (msg.type === 'stats' && !isHistoryMode()) { applyStats(msg.data); updateServices(); }
+    if (msg.type === 'stats') { applyStats(msg.data); if (!isHistoryMode()) updateServices(); }
   };
 }
