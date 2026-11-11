@@ -30,7 +30,7 @@ jobs:
       image: ${{ steps.vars.outputs.image }}
       digest: ${{ steps.push.outputs.digest }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Compute version and image name
         id: vars
@@ -57,12 +57,12 @@ jobs:
           grep -q "^## \[$VERSION\]" CHANGELOG.md \
             || { echo "::error::CHANGELOG.md has no section for $VERSION"; exit 1; }
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
 
       # Smoke-test the amd64 image before anything is pushed
       - name: Build for smoke test
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -74,7 +74,7 @@ jobs:
         run: scripts/smoke-test.sh globegate:smoke
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -82,7 +82,7 @@ jobs:
 
       - name: Image tags and labels
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ steps.vars.outputs.image }}
           flavor: latest=false
@@ -100,7 +100,7 @@ jobs:
 
       - name: Build & push (amd64 + arm64)
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -116,7 +116,7 @@ jobs:
       # Signed provenance, verifiable with `gh attestation verify` (public repos only)
       - name: Attest build provenance
         if: github.event.repository.visibility == 'public'
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ steps.vars.outputs.image }}
           subject-digest: ${{ steps.push.outputs.digest }}
@@ -130,7 +130,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Release notes from CHANGELOG.md
         env:
