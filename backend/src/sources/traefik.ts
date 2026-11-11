@@ -6,14 +6,16 @@ import { Tail } from 'tail';
 import { isIP } from 'net';
 import { config } from '../config.js';
 import { isPrivateIP, normalizeIp } from '../ip.js';
+import { redactPath } from '../filters.js';
 import type { ParsedLine } from '../types.js';
 
 function str(v: unknown): string {
   return v === undefined || v === null ? '' : String(v);
 }
 
-function stripQuery(path: string): string {
-  return (path.split('?')[0] ?? '/').slice(0, 120) || '/';
+/** Drop the query string, mask token-like segments, cap the length. */
+function cleanPath(path: string): string {
+  return redactPath(path.split('?')[0] ?? '/').slice(0, 120) || '/';
 }
 
 /** "jellyfin@docker" → "jellyfin", "websecure-app@file" → "websecure-app" */
@@ -70,7 +72,7 @@ export function parseLogLine(raw: string): ParsedLine | null {
     router: cleanRouterName(router) || 'unknown',
     status: Number.isFinite(status) ? status : 0,
     method: str(o['RequestMethod'] ?? o['request_method']) || 'GET',
-    path:   stripQuery(str(o['RequestPath'] ?? o['request_path']) || '/'),
+    path:   cleanPath(str(o['RequestPath'] ?? o['request_path']) || '/'),
     proto:  'http',
     port:   0,
   };

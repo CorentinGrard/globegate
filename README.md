@@ -150,7 +150,9 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `MAXMIND_LICENSE_KEY` | — | Downloads GeoLite2-City at start and refreshes it weekly |
 | `MAXMIND_ACCOUNT_ID` | — | Recommended with the key: uses MaxMind's authenticated download endpoint |
 | `IP_DISPLAY` | `masked` | What viewers see: `masked` (`203.0.113.x`), `full` or `hidden` |
-| `IGNORE_IPS` | — | IPs/CIDRs dropped before storage, e.g. your own IP or uptime monitors |
+| `IGNORE_IPS` | — | IPs/CIDRs dropped before storage, e.g. uptime monitors |
+| `IGNORE_HOSTS` | — | Hostnames whose current IPs are dropped, e.g. your own domain (see [Hide your own traffic](#hide-your-own-traffic)) |
+| `IGNORE_PATHS` | — | HTTP path prefixes to drop, e.g. `/health,/_health,/ping` |
 | `RETENTION_DAYS` | `7` | How long history is kept |
 | `CONNTRACK` | `auto` | TCP/UDP source: `auto`, `true` (log an error if unavailable) or `false` |
 | `CONNTRACK_IGNORE_PORTS` | `80,443` | Ports to skip |
@@ -173,6 +175,20 @@ GlobeGate shows who connects to your server. Before making it reachable from the
 - **Put it behind authentication** (e.g. Traefik's BasicAuth or ForwardAuth middleware, Authelia, Authentik) unless you really want a public page.
 - Keep `IP_DISPLAY=masked` (the default) or `hidden`. Full IPs are stored in the local database for `RETENTION_DAYS` but never sent to viewers unless `IP_DISPLAY=full`.
 - In the EU, IP addresses are personal data. Keep retention short and only collect what you need.
+
+## Hide your own traffic
+
+If your services or devices use your public URLs from inside your network (health checks, apps on your Wi-Fi, OIDC calls between services), the router sends that traffic back in through NAT loopback. It then arrives from **your own public IP**, and can easily make up most of the globe.
+
+Set `IGNORE_HOSTS` to a DNS name that points at your public IP (your domain, or a DDNS name). GlobeGate resolves it every 5 minutes and drops traffic from that address, so it keeps working when your IP changes:
+
+```env
+IGNORE_HOSTS=home.example.com
+```
+
+Use a DNS-only record, not one proxied by a CDN. For health checks coming from outside (uptime services), drop their endpoints with `IGNORE_PATHS=/health,/_health,/ping`.
+
+Token-like path segments (webhook IDs, invite links, UUIDs) are always masked as `•••` before anything is stored or shown.
 
 ## How it works
 
