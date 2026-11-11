@@ -22,7 +22,7 @@
   "devDependencies": {
     "@types/geojson": "^7946.0.16",
     "@types/three": "^0.187.0",
-    "typescript": "^5.7.0",
+    "typescript": "^7.0.2",
     "vite": "^6.0.0"
   }
 }
