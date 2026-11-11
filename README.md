@@ -182,7 +182,7 @@ Traefik access.log (JSON) ──┐
 Linux conntrack (TCP/UDP) ──┘
 ```
 
-- **Backend** (Node.js 22, TypeScript): tails the Traefik log, streams `conntrack -E` events, geolocates public IPs offline, stores history in SQLite and broadcasts over WebSocket (`/ws`). REST: `/api/history`, `/api/density`, `/health`.
+- **Backend** (Node.js 26, TypeScript): tails the Traefik log, streams `conntrack -E` events, geolocates public IPs offline, stores history in SQLite and broadcasts over WebSocket (`/ws`). REST: `/api/history`, `/api/density`, `/health`.
 - **Frontend** (Vite, TypeScript, Three.js): dotted globe, animated arcs, live feed, stats and the history timeline.
 
 ## Development
