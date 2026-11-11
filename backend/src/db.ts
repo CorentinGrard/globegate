@@ -50,17 +50,41 @@ const stmtInsert = db.prepare<{
     (@ts, @ip, @router, @status, @method, @path, @color, @src_lat, @src_lon, @city, @country, @proto, @port, @cc)
 `);
 
-const stmtSelectWindow = db.prepare<[number, number, number]>(`
-  SELECT * FROM connections
-  WHERE ts >= ? AND ts <= ?
-  ORDER BY ts DESC
+// Time windows are half-open: from <= ts < to
+
+const stmtCount = db.prepare<[number, number]>(
+  'SELECT COUNT(*) AS n FROM connections WHERE ts >= ? AND ts < ?',
+);
+
+// Every `step`-th row in time order: an even sample across the whole window
+const stmtSample = db.prepare<[number, number, number, number]>(`
+  SELECT * FROM (
+    SELECT *, ROW_NUMBER() OVER (ORDER BY ts) AS rn
+    FROM connections WHERE ts >= ? AND ts < ?
+  )
+  WHERE (rn - 1) % ? = 0
+  ORDER BY ts
   LIMIT ?
 `);
 
-const stmtSelectAllTs = db.prepare<[number, number]>(`
-  SELECT ts FROM connections
-  WHERE ts >= ? AND ts <= ?
-  ORDER BY ts ASC
+const stmtByRouter = db.prepare<[number, number]>(`
+  SELECT router AS k, COUNT(*) AS n FROM connections
+  WHERE ts >= ? AND ts < ? GROUP BY router ORDER BY n DESC LIMIT 20
+`);
+
+const stmtByCountry = db.prepare<[number, number]>(`
+  SELECT country, cc, COUNT(*) AS n FROM connections
+  WHERE ts >= ? AND ts < ? AND country != '' GROUP BY country, cc ORDER BY n DESC LIMIT 20
+`);
+
+const stmtByProto = db.prepare<[number, number]>(`
+  SELECT proto AS k, COUNT(*) AS n FROM connections
+  WHERE ts >= ? AND ts < ? GROUP BY proto
+`);
+
+const stmtDensity = db.prepare<{ from: number; to: number; buckets: number }>(`
+  SELECT CAST((ts - @from) * @buckets / (@to - @from) AS INTEGER) AS b, COUNT(*) AS n
+  FROM connections WHERE ts >= @from AND ts < @to GROUP BY b
 `);
 
 const stmtOldest = db.prepare<[]>('SELECT MIN(ts) AS t FROM connections');
@@ -115,23 +139,40 @@ export function insertConnection(conn: Connection): void {
   });
 }
 
-export function queryHistory(fromMs: number, toMs: number, limit = 200): Connection[] {
-  return (stmtSelectWindow.all(fromMs, toMs, limit) as DbRow[]).map(rowToConnection);
+export interface WindowSummary {
+  total:     number;
+  byRouter:  Record<string, number>;
+  byCountry: { country: string; cc: string; n: number }[];
+  byProto:   Record<string, number>;
+}
+
+/**
+ * A time window for replay: up to `limit` rows spread evenly over the whole
+ * window (oldest first), plus exact totals for everything in it.
+ */
+export function queryWindow(fromMs: number, toMs: number, limit: number): { rows: Connection[] } & WindowSummary {
+  const total = (stmtCount.get(fromMs, toMs) as { n: number }).n;
+  const step  = Math.max(1, Math.ceil(total / Math.max(1, limit)));
+  const rows  = (stmtSample.all(fromMs, toMs, step, limit) as DbRow[]).map(rowToConnection);
+  const byRouter: Record<string, number> = {};
+  for (const r of stmtByRouter.all(fromMs, toMs) as { k: string; n: number }[]) byRouter[r.k] = r.n;
+  const byProto: Record<string, number> = {};
+  for (const r of stmtByProto.all(fromMs, toMs) as { k: string; n: number }[]) byProto[r.k || 'http'] = r.n;
+  const byCountry = stmtByCountry.all(fromMs, toMs) as { country: string; cc: string; n: number }[];
+  return { rows, total, byRouter, byCountry, byProto };
 }
 
 export const MAX_DENSITY_BUCKETS = 200;
 
+/** Connection counts in `buckets` equal slices of [from, to). */
 export function queryDensity(fromMs: number, toMs: number, buckets: number): number[] {
   if (!Number.isInteger(buckets) || buckets < 1 || buckets > MAX_DENSITY_BUCKETS) {
     throw new RangeError(`buckets must be an integer between 1 and ${MAX_DENSITY_BUCKETS}`);
   }
   const counts = new Array<number>(buckets).fill(0);
-  const span = toMs - fromMs;
-  if (!(span > 0)) return counts;
-  const rows = stmtSelectAllTs.all(fromMs, toMs) as { ts: number }[];
-  for (const { ts } of rows) {
-    const idx = Math.min(buckets - 1, Math.floor((ts - fromMs) / span * buckets));
-    counts[idx]++;
+  if (!(toMs > fromMs)) return counts;
+  for (const { b, n } of stmtDensity.all({ from: fromMs, to: toMs, buckets }) as { b: number; n: number }[]) {
+    if (b >= 0 && b < buckets) counts[b] = n;
   }
   return counts;
 }

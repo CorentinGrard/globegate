@@ -23,6 +23,7 @@ First public release.
 - Multi-arch images (amd64, arm64) with SBOM and build provenance, published to GHCR on every release.
 
 ### Changed
+- **History replay**: click, drag or use the arrow keys on the timeline bars to replay exactly that period. The panels show its real totals, an even sample of its connections is animated, and the tooltip shows each bar's period and connection count. Previously a click replayed a blind 5-minute window, which was usually empty.
 - Redesigned interface: dotted globe with atmosphere glow, animated arcs with impact ripples, glass panels, floating timeline, responsive layout.
 - Fonts are bundled with the app; the page no longer loads anything from third-party servers.
 - Traefik router names are shown without their provider suffix (`jellyfin@docker` → `jellyfin`).
@@ -32,6 +33,10 @@ First public release.
 - `docker stop` now shuts the container down immediately.
 
 ### Fixed
+- History: picking a new period while a replay was running mixed both replays together.
+- History: clicking **Live** while already live cleared the feed and counters, and returning to live lost the live totals and the services list.
+- History: the timeline tooltip didn't follow the cursor while dragging.
+- History: the density bars loaded every stored timestamp on each refresh; they're now counted by the database.
 - The automatic GeoIP download never worked in the container (`curl` was missing from the image).
 - Real traffic was shown at random cities when the GeoIP database was missing; it is now skipped until the database is available.
 - Traefik logs with kept headers (`request_X-Forwarded-For`, `request_Cf-Connecting-Ip`) are now read correctly.
