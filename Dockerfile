@@ -3,7 +3,7 @@
 # ────────────────────────────────────────────
 #  Stage 1 — frontend (Vite + TypeScript)
 # ────────────────────────────────────────────
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /build/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
@@ -13,7 +13,7 @@ RUN npm run build
 # ────────────────────────────────────────────
 #  Stage 2 — backend (TypeScript → JS)
 # ────────────────────────────────────────────
-FROM node:22-alpine AS backend
+FROM node:26-alpine AS backend
 WORKDIR /build/backend
 # better-sqlite3 is a native addon: node-gyp needs these if no prebuilt binary matches
 RUN apk add --no-cache python3 make g++
@@ -25,7 +25,7 @@ RUN npm run build && npm prune --omit=dev
 # ────────────────────────────────────────────
 #  Stage 3 — runtime
 # ────────────────────────────────────────────
-FROM node:22-alpine
+FROM node:26-alpine
 WORKDIR /app
 
 # libstdc++      runtime dependency of the better-sqlite3 binary
