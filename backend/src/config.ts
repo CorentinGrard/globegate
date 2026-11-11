@@ -4,6 +4,7 @@
 //  Defaults suit local development (`npm run dev`). The Docker image sets the
 //  container paths (/logs, /geoip, /data) through ENV in the Dockerfile.
 import { readFileSync } from 'fs';
+import { dirname, join } from 'path';
 
 function env(name: string): string | undefined {
   const v = process.env[name];
@@ -50,6 +51,24 @@ export function parsePortNames(v: string | undefined): Record<number, string> {
   return out;
 }
 
+/** A secret from NAME, or from the file named by NAME_FILE (Docker secrets). */
+function secret(name: string): string | undefined {
+  const file = env(`${name}_FILE`);
+  if (env(name) || !file) return env(name);
+  try { return readFileSync(file, 'utf8').trim() || undefined; }
+  catch (err) { throw new Error(`Cannot read ${name}_FILE (${file}): ${(err as Error).message}`); }
+}
+
+/** An http(s) base URL without the trailing slash. */
+function url(name: string): string | undefined {
+  const v = env(name);
+  if (v === undefined) return undefined;
+  let u: URL;
+  try { u = new URL(v); } catch { throw new Error(`Invalid env var ${name}: "${v}" (expected a URL like http://127.0.0.1:8080)`); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`Invalid env var ${name}: "${v}" (expected http:// or https://)`);
+  return v.replace(/\/+$/, '');
+}
+
 function readVersion(): string {
   if (env('APP_VERSION')) return env('APP_VERSION')!;
   try {
@@ -59,6 +78,8 @@ function readVersion(): string {
     return 'dev';
   }
 }
+
+const geoipDb = env('GEOIP_DB_PATH') ?? './data/GeoLite2-City.mmdb';
 
 export const config = {
   version:     readVersion(),
@@ -70,7 +91,9 @@ export const config = {
 
   // ── Paths ──
   logPath:     env('TRAEFIK_LOG_PATH') ?? './data/access.log',
-  geoipDb:     env('GEOIP_DB_PATH')    ?? './data/GeoLite2-City.mmdb',
+  geoipDb,
+  // ISP / network owner lookups (optional, downloaded next to the city database)
+  geoipAsnDb:  env('GEOIP_ASN_DB_PATH') ?? join(dirname(geoipDb), 'GeoLite2-ASN.mmdb'),
   dbPath:      env('DB_PATH')          ?? './data/connections.db',
 
   // ── Server marker ──
@@ -105,6 +128,17 @@ export const config = {
   conntrackDedupeMs:    int('CONNTRACK_DEDUPE_SECONDS', 30) * 1000,
   // Extra / overriding port → service names
   conntrackPortNames:   parsePortNames(env('CONNTRACK_PORT_NAMES')),
+
+  // ── CrowdSec (optional): show bans from its Local API ──
+  // URL of the Local API, e.g. http://127.0.0.1:8081
+  crowdsecUrl:     url('CROWDSEC_LAPI_URL'),
+  // Bouncer key for GlobeGate: cscli bouncers add globegate (read-only access to decisions)
+  crowdsecKey:     secret('CROWDSEC_API_KEY'),
+  // Which decisions to show. The defaults are bans decided on this server
+  // (crowdsec) or by you (cscli, console) — not the community blocklists,
+  // which hold tens of thousands of IPs that never connected.
+  crowdsecOrigins: parseList(env('CROWDSEC_ORIGINS') ?? 'crowdsec,cscli,console'),
+  crowdsecPollMs:  Math.max(2, int('CROWDSEC_POLL_SECONDS', 10)) * 1000,
 
   // ── Demo ──
   // auto = generate fake traffic only when no real source is available

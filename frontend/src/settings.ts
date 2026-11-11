@@ -64,6 +64,7 @@ $('ip-clear-btn').addEventListener('click', () => {
   renderIPList();
 });
 ipInput.addEventListener('keydown', e => { if (e.key === 'Enter') $('ip-add-btn').click(); });
+document.addEventListener('globegate:filters', renderIPList); // "Hide" from the details panel
 renderIPList();
 
 // ── Protocol filter (sidebar) ─────────────────
@@ -84,16 +85,19 @@ renderSeg();
 const SOURCE_INFO: Record<SourceName, { name: string; desc: string }> = {
   traefik:   { name: 'Traefik access log', desc: 'HTTP(S) requests with service, status and path.' },
   conntrack: { name: 'All TCP / UDP',      desc: 'Every inbound connection to the host (SSH, VPN, games…).' },
-  demo:      { name: 'Demo mode',          desc: 'Generated traffic — no real source is configured.' },
+  crowdsec:  { name: 'CrowdSec bans',      desc: 'IPs banned by CrowdSec, as red dots; their requests are marked 🛡.' },
+  demo:      { name: 'Demo mode',          desc: 'Generated traffic and bans — no real source is configured.' },
 };
 
 export function renderSources(active: SourceName[]): void {
-  const list: SourceName[] = active.includes('demo') ? ['demo', 'traefik', 'conntrack'] : ['traefik', 'conntrack'];
+  const base: SourceName[] = ['traefik', 'conntrack', 'crowdsec'];
+  const list: SourceName[] = active.includes('demo') ? ['demo', ...base] : base;
   $('src-list').innerHTML = list.map(s => {
     const on = active.includes(s);
     const hint = !on && s === 'conntrack'
       ? '<br>Enable with <code>network_mode: host</code> + <code>cap_add: [NET_ADMIN]</code>.'
-      : !on && s === 'traefik' ? '<br>Mount the access log at <code>/logs/access.log</code>.' : '';
+      : !on && s === 'traefik' ? '<br>Mount the access log at <code>/logs/access.log</code>.'
+      : !on && s === 'crowdsec' ? '<br>Set <code>CROWDSEC_LAPI_URL</code> and <code>CROWDSEC_API_KEY</code>.' : '';
     return `<div class="src ${on ? 'on' : ''}"><i></i><b>${SOURCE_INFO[s].name}${on ? '' : ' · off'}</b><span>${SOURCE_INFO[s].desc}${hint}</span></div>`;
   }).join('');
 }

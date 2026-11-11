@@ -1,7 +1,8 @@
 // ─────────────────────────────────────────────
 //  Source: demo traffic (fake connections from real cities)
 // ─────────────────────────────────────────────
-import type { GeoResult, ParsedLine } from '../types.js';
+import type { BanRow } from '../db.js';
+import type { AsnResult, GeoResult, ParsedLine } from '../types.js';
 
 // [lat, lon, city, country, ISO code]
 const CITIES: [number, number, string, string, string][] = [
@@ -59,6 +60,24 @@ const RAW: [ParsedLine['proto'], number, string][] = [
   ['tcp', 22, 'ssh'], ['udp', 51820, 'wireguard'], ['tcp', 25565, 'minecraft'], ['tcp', 32400, 'plex'],
 ];
 
+const SCENARIOS = [
+  'crowdsecurity/http-probing', 'crowdsecurity/ssh-bf', 'crowdsecurity/http-sensitive-files',
+  'crowdsecurity/http-cve-probing', 'crowdsecurity/http-bad-user-agent', 'crowdsecurity/ssh-slow-bf',
+];
+
+// Hosting networks (where scanners live) and a few home ISPs per country
+const HOSTING: AsnResult[] = [
+  { asn: 14061, org: 'DigitalOcean, LLC' }, { asn: 16509, org: 'Amazon.com, Inc.' },
+  { asn: 16276, org: 'OVH SAS' }, { asn: 24940, org: 'Hetzner Online GmbH' }, { asn: 15169, org: 'Google LLC' },
+];
+const ISPS: Record<string, AsnResult[]> = {
+  FR: [{ asn: 12322, org: 'Free SAS' }, { asn: 3215, org: 'Orange' }],
+  DE: [{ asn: 3320, org: 'Deutsche Telekom AG' }],
+  US: [{ asn: 7922, org: 'Comcast Cable Communications, LLC' }],
+  GB: [{ asn: 2856, org: 'British Telecommunications PLC' }],
+  CN: [{ asn: 4134, org: 'Chinanet' }],
+};
+
 const pick = <T>(a: readonly T[]): T => a[Math.floor(Math.random() * a.length)]!;
 
 /** Documentation range addresses (RFC 5737) — never real people. */
@@ -73,24 +92,69 @@ function fakeGeo(): GeoResult {
   return { lat: lat + jitter(), lon: lon + jitter(), city, country, countryCode };
 }
 
-export function fakeEvent(): { line: ParsedLine; geo: GeoResult } {
-  const ip = fakeIp();
+// ── Visitors come back, so their details page has a history ──
+interface Visitor { ip: string; geo: GeoResult; asn: AsnResult }
+const visitors: Visitor[] = [];
+const banned: Visitor[] = [];
+
+function visitor(): Visitor {
+  if (visitors.length >= 40 && Math.random() < 0.75) return pick(visitors);
+  const geo = fakeGeo();
+  const v = { ip: fakeIp(), geo, asn: Math.random() < 0.6 && ISPS[geo.countryCode] ? pick(ISPS[geo.countryCode]!) : pick(HOSTING) };
+  if (visitors.length >= 80) visitors.splice(Math.floor(Math.random() * visitors.length), 1);
+  visitors.push(v);
+  return v;
+}
+
+export function fakeEvent(): { line: ParsedLine; geo: GeoResult; asn: AsnResult } {
+  // Banned scanners keep knocking and get 403 from the bouncer
+  if (banned.length && Math.random() < 0.12) {
+    const v = pick(banned);
+    return { line: { ip: v.ip, router: pick(ROUTERS), status: 403, method: 'GET', path: pick(['/.env', '/wp-login.php', '/admin']), proto: 'http', port: 0 }, geo: v.geo, asn: v.asn };
+  }
+  const v = visitor();
   if (Math.random() < 0.25) {
     const [proto, port, router] = pick(RAW);
-    return { line: { ip, router, status: 0, method: '', path: '', proto, port }, geo: fakeGeo() };
+    return { line: { ip: v.ip, router, status: 0, method: '', path: '', proto, port }, geo: v.geo, asn: v.asn };
   }
   return {
     line: {
-      ip, router: pick(ROUTERS), status: pick(STATUSES),
+      ip: v.ip, router: pick(ROUTERS), status: pick(STATUSES),
       method: Math.random() < 0.85 ? 'GET' : 'POST', path: pick(PATHS), proto: 'http', port: 0,
     },
-    geo: fakeGeo(),
+    geo: v.geo, asn: v.asn,
   };
 }
 
-/** Emit a fake connection every ~2 s. Returns a stop function. */
-export function startDemo(emit: (line: ParsedLine, geo: GeoResult) => void): () => void {
+let banId = 0;
+/** A CrowdSec-style ban of a scanner on a hosting network. Ids are negative: never a real decision. */
+export function fakeBan(now = Date.now()): BanRow {
+  const geo = fakeGeo();
+  const v = { ip: fakeIp(), geo, asn: pick(HOSTING) };
+  banned.push(v);
+  if (banned.length > 12) banned.shift();
+  return {
+    id: -(now * 100 + (banId++ % 100)), value: v.ip, scope: 'ip', scenario: pick(SCENARIOS), origin: 'crowdsec', type: 'ban',
+    start: now, until: now + 4 * 3_600_000, src_lat: geo.lat, src_lon: geo.lon,
+    city: geo.city, country: geo.country, cc: geo.countryCode, asn: v.asn.asn, org: v.asn.org,
+  };
+}
+
+/**
+ * Emit a fake connection every ~2 s, and a fake ban every ~40 s when `onBan`
+ * is given (only when CrowdSec isn't configured). Returns a stop function.
+ */
+export function startDemo(
+  emit: (line: ParsedLine, geo: GeoResult, asn: AsnResult) => void,
+  onBan?: (ban: BanRow) => void,
+): () => void {
   console.warn('🎭 Demo mode — generating fake traffic');
-  const timer = setInterval(() => { const e = fakeEvent(); emit(e.line, e.geo); }, 2_000);
-  return () => { clearInterval(timer); console.log('🎭 Demo mode stopped — a real source is now available'); };
+  const timer = setInterval(() => { const e = fakeEvent(); emit(e.line, e.geo, e.asn); }, 2_000);
+  const banTimer = onBan ? setInterval(() => onBan(fakeBan()), 40_000) : null;
+  if (onBan) setTimeout(() => onBan(fakeBan()), 8_000).unref();
+  return () => {
+    clearInterval(timer);
+    if (banTimer) clearInterval(banTimer);
+    console.log('🎭 Demo mode stopped — a real source is now available');
+  };
 }
