@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 
 import { config } from './config.js';
 import { initGeoIP } from './geo.js';
-import { closeDb, pruneOldRows, queryDensity, queryHistory, queryOldest } from './db.js';
+import { closeDb, MAX_DENSITY_BUCKETS, pruneOldRows, queryDensity, queryHistory, queryOldest } from './db.js';
 import { Hub, toPublic } from './hub.js';
 import { startTraefik } from './sources/traefik.js';
 import { startConntrack, stopConntrack } from './sources/conntrack.js';
@@ -62,7 +62,7 @@ async function main(): Promise<void> {
   app.get('/api/density', (req, res) => {
     const to      = intParam(req, 'to', Date.now());
     const from    = intParam(req, 'from', to - config.retentionMs);
-    const buckets = Math.min(intParam(req, 'buckets', 80), 200);
+    const buckets = Math.min(intParam(req, 'buckets', 80), MAX_DENSITY_BUCKETS);
     res.json({ buckets: queryDensity(from, to, buckets) });
   });
 
