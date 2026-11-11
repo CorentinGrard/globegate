@@ -28,7 +28,7 @@ scripts/            release.sh, smoke-test.sh
 
 ## Development setup
 
-Requirements: Node.js 22 (a `mise.toml` is provided) and npm.
+Requirements: Node.js 26 (a `mise.toml` is provided) and npm.
 
 ```bash
 # Terminal 1: backend on :3000 with fake traffic

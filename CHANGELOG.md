@@ -25,6 +25,7 @@ First public release.
 - Fonts are bundled with the app; the page no longer loads anything from third-party servers.
 - Traefik router names are shown without their provider suffix (`jellyfin@docker` → `jellyfin`).
 - The WebSocket endpoint moved to `/ws`.
+- Runs on Node.js 26 (LTS), with Express 5, three.js r187, Vite 8 and TypeScript 7. The image no longer needs build tools.
 - The GeoIP database is picked up as soon as it's downloaded and reloaded after weekly updates, without a restart.
 - `docker stop` now shuts the container down immediately.
 
