@@ -7,6 +7,8 @@ Add your changes under **Unreleased** in the same PR as the code. `scripts/relea
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-11
+
 First public release.
 
 ### Added
@@ -48,3 +50,6 @@ First public release.
 - Log fields are escaped before being displayed, and feed cards are built without `innerHTML`.
 - `/api/density` validates the bucket count itself (CodeQL `js/resource-exhaustion`).
 - Local `docker build` copied host `node_modules` into the image.
+
+[Unreleased]: https://github.com/CorentinGrard/globegate/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/CorentinGrard/globegate/releases/tag/v1.0.0

@@ -1,6 +1,6 @@
 {
   "name": "globegate-backend",
-  "version": "1.0.0-dev",
+  "version": "1.0.0",
   "description": "GlobeGate server: collects connections from Traefik and conntrack, geolocates them and streams them to the globe.",
   "license": "MIT",
   "repository": {
