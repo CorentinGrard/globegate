@@ -1,0 +1,39 @@
+{
+  "name": "globegate-backend",
+  "version": "1.0.0-dev",
+  "description": "GlobeGate server: collects connections from Traefik and conntrack, geolocates them and streams them to the globe.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CorentinGrard/globegate.git"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22 <25",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "express": "^4.21.2",
+    "maxmind": "^4.3.21",
+    "tail": "^2.2.6",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@types/tail": "^2.2.3",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "globegate-frontend",
+  "version": "1.0.0-dev",
+  "description": "GlobeGate web UI: live 3D globe of connections.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CorentinGrard/globegate.git"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "three": "^0.171.0"
+  },
+  "devDependencies": {
+    "@types/geojson": "^7946.0.16",
+    "@types/three": "^0.171.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0"
+  }
+}

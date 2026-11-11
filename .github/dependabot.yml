@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /backend
+    schedule: { interval: weekly }
+    groups:
+      backend-minor:
+        update-types: [minor, patch]
+    commit-message: { prefix: "deps(backend)" }
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly }
+    groups:
+      frontend-minor:
+        update-types: [minor, patch]
+    commit-message: { prefix: "deps(frontend)" }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message: { prefix: "ci" }
+
+  - package-ecosystem: docker
+    directory: /
+    schedule: { interval: weekly }
+    commit-message: { prefix: "deps(docker)" }

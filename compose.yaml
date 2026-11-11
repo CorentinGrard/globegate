@@ -1,0 +1,27 @@
+services:
+  globegate:
+    # :latest = latest release. Pin a major version (e.g. :1) to avoid surprises.
+    image: ghcr.io/corentingrard/globegate:latest
+    container_name: globegate
+    restart: unless-stopped
+    env_file: .env
+
+    # ── See ALL inbound TCP/UDP connections (SSH, VPN, game servers…) ──
+    # GlobeGate reads the host's connection-tracking table, so it shares the
+    # host network and needs NET_ADMIN. The UI is then served directly on the
+    # host at $PORT (default 3000).
+    #
+    # HTTP(S) from Traefik only? Remove these two keys and add:
+    #   ports:
+    #     - "3000:3000"
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+
+    volumes:
+      # Directory containing Traefik's JSON access.log (read-only)
+      - /var/log/traefik:/logs:ro
+      # GeoIP database (downloaded and refreshed automatically)
+      - ./geoip:/geoip
+      # History database
+      - ./data:/data

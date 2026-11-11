@@ -1,0 +1,53 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report this! Please remove any IP addresses or keys from logs before pasting them.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you see instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start GlobeGate with …
+        2. Open …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: GlobeGate version
+      description: Shown at the bottom of the settings drawer, or `curl http://<host>:3000/health`.
+      placeholder: "1.2.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: sources
+    attributes:
+      label: Data sources in use
+      multiple: true
+      options:
+        - Traefik access log
+        - Conntrack (TCP/UDP)
+        - Demo mode
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Docker/Compose version, host OS, architecture, network setup (NAT, tunnel…), relevant parts of compose.yaml and .env (no secrets).
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container logs
+      description: Output of `docker logs globegate` around the problem.
+      render: text
