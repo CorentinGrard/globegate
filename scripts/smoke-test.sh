@@ -23,18 +23,22 @@ done
 health=$(curl -fsS "http://127.0.0.1:${PORT}/health") || fail "/health not reachable"
 echo "✅ /health → $health"
 
-curl -fsS "http://127.0.0.1:${PORT}/" | grep -q "<title>GlobeGate" || fail "index.html not served"
+# Fetch into variables first: `curl | grep -q` fails under pipefail when grep exits early
+html=$(curl -fsS "http://127.0.0.1:${PORT}/") || fail "index.html not reachable"
+grep -q "<title>GlobeGate" <<<"$html" || fail "index.html not served"
 curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/ne_110m_land.geojson" || fail "land data not served"
 echo "✅ frontend served"
 
 echo "⏳ waiting for demo traffic"
 for _ in $(seq 1 15); do
-  rows=$( (curl -fsS "http://127.0.0.1:${PORT}/api/history?limit=5" || true) | { grep -o '"id"' || true; } | wc -l)
+  body=$(curl -fsS "http://127.0.0.1:${PORT}/api/history?limit=5" || true)
+  rows=$(grep -o '"id"' <<<"$body" | wc -l || true)
   [ "$rows" -gt 0 ] && break
   sleep 1
 done
 [ "${rows:-0}" -gt 0 ] || fail "no connections recorded"
-curl -fsS "http://127.0.0.1:${PORT}/api/history?limit=1" | grep -q '\.x"' || fail "IPs are not masked by default"
+latest=$(curl -fsS "http://127.0.0.1:${PORT}/api/history?limit=1") || fail "/api/history not reachable"
+grep -q '\.x"' <<<"$latest" || fail "IPs are not masked by default"
 echo "✅ $rows connection(s) recorded, IPs masked"
 
 start=$(date +%s)

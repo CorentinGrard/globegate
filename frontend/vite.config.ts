@@ -18,9 +18,13 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     rollupOptions: {
-      // Keep three.js in its own chunk — large but cacheable separately
+      // Keep three.js in its own chunk — large but cacheable separately.
+      // (Function form: the object form isn't supported by Vite 8 / Rolldown.)
       output: {
-        manualChunks: { three: ['three'] },
+        manualChunks(id: string) {
+          if (id.includes('/node_modules/three/')) return 'three';
+          return undefined;
+        },
       },
     },
   },

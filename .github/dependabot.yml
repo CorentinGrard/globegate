@@ -3,6 +3,10 @@ updates:
   - package-ecosystem: npm
     directory: /backend
     schedule: { interval: weekly }
+    ignore:
+      # Must match the Node.js major in the Dockerfile — upgraded together, by hand
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       backend-minor:
         update-types: [minor, patch]
@@ -27,4 +31,8 @@ updates:
   - package-ecosystem: docker
     directory: /
     schedule: { interval: weekly }
+    ignore:
+      # Node.js majors are upgraded deliberately (Dockerfile + CI + engines + @types/node)
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
     commit-message: { prefix: "deps(docker)" }
