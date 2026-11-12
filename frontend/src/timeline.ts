@@ -13,22 +13,14 @@ import { addReplayBans, resetReplay, setReplayView, updateReplayBans } from './b
 import { applySummary, setPeriodLabel, setReplayRate } from './stats.js';
 import { setHistoryLabel } from './status.js';
 import { fmtTime, load, save } from './util.js';
+import {
+  ARCS_PER_SEC, CHUNK_PLAY_MS, LIVE_ZONE, PERIOD_PLAY_MS, PERIODS, SPEEDS,
+  advance, agoLabel, barAt as barIndex, barCount as barsFor, fmtRate as fmtRateOf, fracOf as fracIn,
+  isClipped, nextChunk, periodRange, playbackRate, quietSkip, spanOf, timeAt as timeIn,
+} from './replay.js';
 import type { Connection, HistoryResponse, SummaryResponse } from './types.js';
 
-const PERIODS = [
-  { key: '1h',  short: '1h',  long: 'Last hour',     ms: 3_600_000 },
-  { key: '6h',  short: '6h',  long: 'Last 6 hours',  ms: 6 * 3_600_000 },
-  { key: '24h', short: '24h', long: 'Last 24 hours', ms: 86_400_000 },
-  { key: '7d',  short: '7d',  long: 'Last 7 days',   ms: 7 * 86_400_000 },
-] as const;
-const SPEEDS        = [0.25, 0.5, 1, 2, 4]; // × "the whole period in a minute"
-const PERIOD_PLAY_MS = 60_000;
-const ARCS_PER_SEC  = 18;     // most connections drawn per second of playback
-const CHUNK_PLAY_MS = 3_000;  // data fetched ahead, in playback time
-const QUIET_SKIP_MS = 1_500;  // gaps longer than this (playback time) are skipped
-const LEAD_IN_MS    = 400;    // …landing this long before the next connection
 const FEED_EVERY_MS = 250;    // at most 4 feed cards per second
-const LIVE_ZONE     = 0.985;  // clicking beyond this fraction of the track = live
 
 // ── State ─────────────────────────────────────
 let periodIdx = Math.min(PERIODS.length - 1, Math.max(0, load('period', 2)));
@@ -67,13 +59,12 @@ const leftLabel = document.getElementById('tl-label-left')!;
 const barsEl    = document.getElementById('tl-density')!;
 
 // ── Helpers ───────────────────────────────────
-const span     = (): number => Math.max(1, range.to - range.from);
-const bucketMs = (): number => span() / Math.max(1, counts.length);
+const bucketMs = (): number => spanOf(range) / Math.max(1, counts.length);
 /** Real milliseconds per millisecond of playback */
-const rate     = (): number => span() / PERIOD_PLAY_MS * SPEEDS[speedIdx]!;
-const fracOf   = (t: number): number => Math.max(0, Math.min(1, (t - range.from) / span()));
-const timeAt   = (f: number): number => range.from + f * span();
-const barAt    = (t: number): number => Math.max(0, Math.min(counts.length - 1, Math.floor(fracOf(t) * counts.length)));
+const rate     = (): number => playbackRate(range, SPEEDS[speedIdx]!);
+const fracOf   = (t: number): number => fracIn(t, range);
+const timeAt   = (f: number): number => timeIn(f, range);
+const barAt    = (t: number): number => barIndex(t, range, counts.length);
 
 function fracFromEvent(e: MouseEvent | TouchEvent): number {
   const rect = wrap.getBoundingClientRect();
@@ -81,12 +72,7 @@ function fracFromEvent(e: MouseEvent | TouchEvent): number {
   return Math.max(0, Math.min(1, (x - rect.left) / rect.width));
 }
 
-function fmtRate(): string {
-  const perSec = rate() * 1000; // real ms per playback second
-  if (perSec >= 3_600_000) return `${Math.round(perSec / 360_000) / 10} h/s`;
-  if (perSec >= 60_000) return `${Math.round(perSec / 60_000)} min/s`;
-  return `${Math.max(1, Math.round(perSec / 1000))} s/s`;
-}
+const fmtRate = (): string => fmtRateOf(rate());
 
 function describe(f: number): string {
   if (f >= LIVE_ZONE || !counts.length) return 'Live';
@@ -158,18 +144,12 @@ function renderControls(): void {
   });
   speedBtn.textContent = fmtRate();
   speedBtn.title = `Playback speed: ${SPEEDS[speedIdx]}× (the period plays in ${Math.round(PERIOD_PLAY_MS / SPEEDS[speedIdx]! / 1000)} s)`;
-  const hours = (range.to - range.from) / 3_600_000;
-  leftLabel.textContent = hours < 1 ? `${Math.max(1, Math.round(hours * 60))}m ago`
-    : hours < 48 ? `${Math.round(hours)}h ago` : `${Math.round(hours / 24)}d ago`;
-  const clipped = range.to - range.from < PERIODS[periodIdx]!.ms - 60_000;
-  setPeriodLabel(clipped ? `Since ${fmtTime(range.from)} (all stored history)` : PERIODS[periodIdx]!.long);
+  leftLabel.textContent = agoLabel(range.to - range.from);
+  setPeriodLabel(isClipped(range, PERIODS[periodIdx]!.ms) ? `Since ${fmtTime(range.from)} (all stored history)` : PERIODS[periodIdx]!.long);
 }
 
 // ── Data for the period ───────────────────────
-function barCount(): number {
-  // ~1 bar per 12 px of track: readable on phones, detailed on wide screens
-  return Math.max(24, Math.min(120, Math.round(wrap.getBoundingClientRect().width / 12)));
-}
+const barCount = (): number => barsFor(wrap.getBoundingClientRect().width);
 
 /**
  * Fetch the bars and the panel totals for the period ending now. Live, this
@@ -181,9 +161,8 @@ export async function refresh(): Promise<void> {
 }
 
 async function loadPeriod(): Promise<void> {
-  const to   = Date.now();
-  const from = Math.min(Math.max(to - PERIODS[periodIdx]!.ms, oldest), to - 60_000);
-  const n    = barCount();
+  const { from, to } = periodRange(Date.now(), PERIODS[periodIdx]!.ms, oldest);
+  const n = barCount();
   try {
     const [d, s] = await Promise.all([
       fetch(`/api/density?from=${from}&to=${to}&buckets=${n}`).then(r => r.json()) as Promise<{ buckets: number[] }>,
@@ -235,11 +214,11 @@ function showConnection(c: Connection, now: number): void {
 
 /** Keep about CHUNK_PLAY_MS of data ahead of the playhead. */
 async function fillAhead(): Promise<void> {
-  if (loading || loadedTo >= range.to || loadedTo - T > rate() * CHUNK_PLAY_MS) return;
+  const chunk = loading ? null : nextChunk(loadedTo, T, range.to, rate());
+  if (!chunk) return;
   loading = true;
   const g = gen;
-  const from = loadedTo;
-  const to   = Math.min(range.to, from + rate() * CHUNK_PLAY_MS);
+  const { from, to } = chunk;
   let data: HistoryResponse;
   try {
     data = await fetchWindow(from, to, Math.ceil(CHUNK_PLAY_MS / 1000 * ARCS_PER_SEC));
@@ -254,12 +233,10 @@ async function fillAhead(): Promise<void> {
   addReplayBans(data.bans);
   loadedTo = to;
   // Nothing in this chunk: skip ahead to just before the next connection
-  if (!data.total) {
-    const resume = data.next === null ? range.to : data.next - rate() * LEAD_IN_MS;
-    if (resume - from > rate() * QUIET_SKIP_MS) {
-      quietFrom ??= from;
-      loadedTo = Math.min(range.to, Math.max(to, resume));
-    }
+  const skipTo = data.total ? null : quietSkip(chunk, data.next, range.to, rate());
+  if (skipTo !== null) {
+    quietFrom ??= from;
+    loadedTo = skipTo;
   }
   if (playing) void fillAhead();
 }
@@ -271,13 +248,7 @@ function frame(now: number): void {
   lastFrame = now;
 
   if (playing) {
-    // Quiet stretch and nothing left to show: jump over it
-    if (quietFrom !== null && !queue.length && T >= quietFrom) {
-      T = loadedTo;
-      quietFrom = null;
-    } else {
-      T = Math.min(T + dt * rate(), loadedTo); // waits for data if the network is slow
-    }
+    ({ T, quietFrom } = advance({ T, loadedTo, quietFrom }, dt, rate(), !queue.length));
     while (queue.length && queue[0]!.ts < T) showConnection(queue.shift()!.c, now);
     if (T >= range.to) { goLive(); return; }
     void fillAhead();

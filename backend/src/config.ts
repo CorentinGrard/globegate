@@ -88,6 +88,9 @@ export const config = {
   // it to the Docker bridge IP (e.g. 172.17.0.1) so only containers such as
   // your reverse proxy can reach the UI — not the whole LAN.
   listenAddress: env('LISTEN_ADDRESS'),
+  // Extra browser origins allowed to open the WebSocket, for reverse proxies
+  // that don't pass the original Host header (e.g. https://globe.example.com)
+  allowedOrigins: parseList(env('ALLOWED_ORIGINS')),
 
   // ── Paths ──
   logPath:     env('TRAEFIK_LOG_PATH') ?? './data/access.log',
