@@ -187,6 +187,7 @@ All settings are environment variables (see [`.env.example`](.env.example)).
 | `DEMO` | `auto` | Fake traffic: `auto` (only when no source is available), `true` or `false` |
 | `PORT` | `3000` | HTTP/WebSocket port |
 | `LISTEN_ADDRESS` | all interfaces | Listen only on this address, e.g. the Docker bridge IP `172.17.0.1` (see below) |
+| `ALLOWED_ORIGINS` | — | Extra origins allowed to open the live feed, e.g. `https://globe.example.com`. Only needed if your proxy rewrites the `Host` header |
 | `TRAEFIK_LOG_PATH` | `/logs/access.log` | Traefik log inside the container |
 | `GEOIP_DB_PATH` | `/geoip/GeoLite2-City.mmdb` | GeoIP database inside the container |
 | `GEOIP_ASN_DB_PATH` | `GeoLite2-ASN.mmdb` next to it | ISP database (optional) |
@@ -206,6 +207,7 @@ GlobeGate shows who connects to your server. Before making it reachable from the
 
 - **Put it behind authentication** (e.g. Traefik's BasicAuth or ForwardAuth middleware, Authelia, Authentik) unless you really want a public page.
 - Keep `IP_DISPLAY=masked` (the default) or `hidden`. Full IPs are stored in the local database for `RETENTION_DAYS` but never sent to viewers unless `IP_DISPLAY=full`. Viewers can still open the details of a visitor (its network, visits and requests), with the IP shown the same way.
+- Other websites can't read your dashboard through your login: the live feed only accepts browsers on the dashboard's own address (set `ALLOWED_ORIGINS` if your proxy rewrites the `Host` header), and the page is served with a strict Content-Security-Policy.
 - In the EU, IP addresses are personal data. Keep retention short and only collect what you need.
 
 ## Hide your own traffic

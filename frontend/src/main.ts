@@ -4,6 +4,7 @@
 import '@fontsource-variable/inter/index.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
+import './style.css';
 import { scene, camera, renderer, loadGlobeTexture, applyMomentum } from './globe';
 import { tickArcs }       from './arcs';
 import { tickBans }       from './bans';

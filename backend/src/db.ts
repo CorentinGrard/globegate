@@ -10,6 +10,15 @@ import { config } from './config.js';
 // ── Open & migrate ────────────────────────────
 mkdirSync(dirname(config.dbPath), { recursive: true });
 const db = new Database(config.dbPath);
+
+// Let deleted rows give their space back to the disk (see reclaimSpace). The
+// mode can only be switched on an existing file by rebuilding it, once.
+if (db.pragma('auto_vacuum', { simple: true }) !== 2) {
+  const rebuilding = (db.pragma('page_count', { simple: true }) as number) > 1;
+  if (rebuilding) console.log('🧹 Compacting the history database (one time, may take a moment)…');
+  db.pragma('auto_vacuum = INCREMENTAL');
+  db.exec('VACUUM');
+}
 db.pragma('journal_mode = WAL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS connections (
@@ -290,6 +299,24 @@ export function pruneOldRows(): number {
   const cutoff = Date.now() - config.retentionMs;
   stmtPruneBans.run(cutoff);
   return stmtPrune.run(cutoff).changes;
+}
+
+/**
+ * Return the pages freed by pruning to the filesystem, so the file shrinks with
+ * the data instead of staying at its largest size. Cheap when nothing is free.
+ */
+export function reclaimSpace(): void {
+  if ((db.pragma('freelist_count', { simple: true }) as number) === 0) return;
+  db.pragma('incremental_vacuum');
+  db.pragma('wal_checkpoint(TRUNCATE)');
+}
+
+/** File size as SQLite sees it: used pages and free pages. */
+export function dbPages(): { total: number; free: number } {
+  return {
+    total: db.pragma('page_count', { simple: true }) as number,
+    free:  db.pragma('freelist_count', { simple: true }) as number,
+  };
 }
 
 // ── Visitor ───────────────────────────────────

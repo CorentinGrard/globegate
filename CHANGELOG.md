@@ -7,6 +7,13 @@ Add your changes under **Unreleased** in the same PR as the code. `scripts/relea
 
 ## [Unreleased]
 
+### Security
+- The live feed (`/ws`) only accepts connections opened from the dashboard itself. Before, any website you visited while logged in to your reverse proxy could open it in the background and read your traffic. If your proxy rewrites the `Host` header, list your dashboard's address in `ALLOWED_ORIGINS`.
+- The page is served with a strict Content-Security-Policy: only its own scripts, styles and fonts can load.
+
+### Fixed
+- The history database now shrinks when old data is pruned, instead of staying at its largest size. Existing databases are compacted once on the first start.
+
 ## [1.0.0] - 2026-11-11
 
 First public release.
