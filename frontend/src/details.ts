@@ -4,11 +4,12 @@
 //  Shows everything stored about the IP behind it: network owner, when it was
 //  first and last seen, what it connected to, and its CrowdSec bans.
 import * as THREE from 'three';
-import { pickArc, spawnRipple, filteredIPs, saveFilteredIPs, clearAllArcs } from './arcs.js';
+import { pickArc, setHoveredArc, spawnRipple, filteredIPs, saveFilteredIPs, clearAllArcs } from './arcs.js';
 import { BAN_COLOR, banLabel, pickBan, timeLeft } from './bans.js';
 import { GLOBE_R, ll2v } from './globe.js';
 import { ago, el, flag, fmtTime, serviceColor, type DetailsHint, type DetailsRequest, type DetailsTarget } from './util.js';
-import type { Ban, Connection, VisitorResponse } from './types.js';
+import type { Ban, VisitorResponse } from './types.js';
+import type { ArcHit } from './arcs.js';
 
 const panel   = document.getElementById('detail-panel')!;
 const flagEl  = document.getElementById('dp-flag')!;
@@ -253,7 +254,7 @@ function render(v: VisitorResponse): void {
 }
 
 // ── Picking on the globe ──────────────────────
-type Hit = { conn: Connection; d: number } | { ban: Ban; d: number };
+type Hit = ArcHit | { ban: Ban; d: number };
 
 function pick(x: number, y: number, radius: number): Hit | null {
   const a = pickArc(x, y, radius);
@@ -285,9 +286,15 @@ canvas.addEventListener('pointermove', e => {
   if (e.buttons) { hideTip(); return; }
   if (!hoverFrame) hoverFrame = requestAnimationFrame(updateHover);
 });
-canvas.addEventListener('pointerleave', hideTip);
+canvas.addEventListener('pointerleave', () => { hovering = false; hideTip(); });
+canvas.addEventListener('pointerenter', e => { hovering = e.pointerType === 'mouse'; });
+
+// Arcs move under a still mouse (rotation, new arcs): look again a few times a second
+let hovering = false;
+setInterval(() => { if (hovering && !hoverFrame && !down) hoverFrame = requestAnimationFrame(updateHover); }, 150);
 
 function hideTip(): void {
+  setHoveredArc(null);
   tipEl.classList.remove('show');
   canvas.style.cursor = '';
 }
@@ -296,6 +303,7 @@ function updateHover(): void {
   hoverFrame = 0;
   const hit = pick(hoverAt.x, hoverAt.y, 12);
   if (!hit) { hideTip(); return; }
+  setHoveredArc('arc' in hit ? hit.arc : null);
   canvas.style.cursor = 'pointer';
   if ('conn' in hit) {
     const c = hit.conn;

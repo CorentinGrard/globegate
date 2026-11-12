@@ -12,6 +12,8 @@ Add your changes under **Unreleased** in the same PR as the code. `scripts/relea
 - The page is served with a strict Content-Security-Policy: only its own scripts, styles and fonts can load.
 
 ### Fixed
+- Clicking an arc is much more precise: the whole line is clickable, not just a few points along it, and parts hidden behind the globe are ignored. The arc under the mouse is highlighted and stays on screen until you move away.
+- The visitor details panel is no longer see-through, so the panels under it don't show through the text.
 - The history database now shrinks when old data is pruned, instead of staying at its largest size. Existing databases are compacted once on the first start.
 
 ## [1.0.0] - 2026-11-11

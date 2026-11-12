@@ -131,6 +131,8 @@ export function setArcsFrozen(f: boolean): void { frozen = f; }
 const SEGMENTS = 64;
 let arcs: Arc[] = [];
 
+const baseWidth = (): number => (window.innerWidth < 641 ? 1.6 : 2);
+
 function parseColor(css: string): THREE.Color {
   const m = css.match(/hsl\(([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
   if (m) return new THREE.Color().setHSL(+m[1]! / 360, +m[2]! / 100, +m[3]! / 100);
@@ -138,6 +140,8 @@ function parseColor(css: string): THREE.Color {
 }
 
 /** Spawn an animated arc. Returns the arc handle (or null if hidden). */
+export type { Arc };
+
 export function spawnArc(conn: Connection, onFade: (() => void) | null = null): Arc | null {
   if (!isVisible(conn)) return null;
   return spawnArcBetween(conn.source, conn.target, conn.color, onFade, conn);
@@ -172,7 +176,7 @@ export function spawnArcBetween(
   geo.instanceCount = 0;
 
   const mat = new LineMaterial({
-    linewidth: window.innerWidth < 641 ? 1.6 : 2,
+    linewidth: baseWidth(),
     vertexColors: true,
     transparent: true,
     opacity: 0,
@@ -204,24 +208,61 @@ export function spawnArcBetween(
 }
 
 // ── Picking (click / hover on the globe) ──────
-const PICK_SAMPLES = [0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9];
+const PICK_STEPS = 32;     // the arc is tested as this many straight screen segments
+const PICK_END   = 0.92;   // all arcs meet at the server: its end isn't a useful target
+const _a = new THREE.Vector3();
 
-/** The connection whose arc passes closest to a screen point, within `maxPx`. */
-export function pickArc(x: number, y: number, maxPx = 14): { conn: Connection; d: number } | null {
-  let best: { conn: Connection; d: number } | null = null;
-  const p = new THREE.Vector3();
-  for (const a of arcs) {
-    if (!a.conn || a.state === 'fading') continue;
-    const drawn = a.state === 'drawing' ? 1 - Math.pow(1 - a.progress, 2) : 1;
-    for (const t of PICK_SAMPLES) {
-      if (t > drawn) break;
-      const sp = toScreen(a.curve.getPoint(t, p));
-      if (!sp) continue;
-      const d = Math.hypot(sp.x - x, sp.y - y) - (t === 0 ? 4 : 0); // the source dot is a bigger target
-      if (d <= maxPx && (!best || d < best.d)) best = { conn: a.conn, d };
+/** Distance from point p to segment ab, in pixels. */
+function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+export interface ArcHit { conn: Connection; d: number; arc: Arc }
+
+/**
+ * The connection whose arc passes closest to a screen point, within `maxPx`.
+ * Measured against the drawn line itself (not a few sample points), skipping
+ * parts hidden behind the globe. Close calls go to the newest arc.
+ */
+export function pickArc(x: number, y: number, maxPx = 14): ArcHit | null {
+  let best: ArcHit | null = null;
+  for (let i = arcs.length - 1; i >= 0; i--) {   // newest first
+    const a = arcs[i]!;
+    if (!a.conn || a.mat.opacity < 0.3) continue;
+    const drawn = Math.min(PICK_END, a.state === 'drawing' ? 1 - Math.pow(1 - a.progress, 2) : 1);
+    // The source dot is a slightly bigger target
+    const src = toScreen(a.curve.getPoint(0, _a));
+    let d = src ? Math.hypot(src.x - x, src.y - y) - 4 : Infinity;
+    let prev = src;
+    const steps = Math.max(1, Math.ceil(PICK_STEPS * drawn));
+    for (let k = 1; k <= steps; k++) {
+      const sp = toScreen(a.curve.getPoint(drawn * k / steps, _a));
+      if (sp && prev) d = Math.min(d, segDist(x, y, prev.x, prev.y, sp.x, sp.y));
+      prev = sp;
     }
+    if (d <= maxPx && (!best || d < best.d - 1.5)) best = { conn: a.conn, d, arc: a };
   }
   return best;
+}
+
+// The arc under the mouse is highlighted and doesn't fade away before the click
+let hovered: Arc | null = null;
+export function setHoveredArc(a: Arc | null): void {
+  if (a === hovered) return;
+  if (hovered) hovered.mat.linewidth = baseWidth();
+  hovered = a && arcs.includes(a) ? a : null;
+  if (!hovered) return;
+  hovered.mat.linewidth = baseWidth() * 1.9;
+  if (hovered.state === 'fading') {   // caught while fading: bring it back
+    hovered.state = 'holding';
+    hovered.fade = 0;
+    hovered.hold = arcHoldSeconds;    // and let it go as soon as the mouse leaves
+    hovered.mat.opacity = 1;
+    hovered.src.material.opacity = 0.9;
+  }
 }
 
 /** Advance all arcs, ripples and the server beacon by dt seconds. */
@@ -244,7 +285,7 @@ export function tickArcs(dt: number): void {
         spawnRipple(a.curve.v2, a.color, 0.06, 1.1);
       }
     } else if (a.state === 'holding') {
-      if (!frozen) a.hold += dt;
+      if (!frozen && a !== hovered) a.hold += dt;
       if (a.hold > arcHoldSeconds) { a.state = 'fading'; a.onFade?.(); }
     } else {
       a.fade = Math.min(1, a.fade + dt * 0.8);
@@ -257,6 +298,7 @@ export function tickArcs(dt: number): void {
 }
 
 function disposeArc(a: Arc): void {
+  if (a === hovered) hovered = null;
   globeGroup.remove(a.line, a.head, a.src);
   a.geo.dispose();
   a.mat.dispose();
