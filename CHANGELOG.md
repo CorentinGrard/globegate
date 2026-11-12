@@ -7,6 +7,8 @@ Add your changes under **Unreleased** in the same PR as the code. `scripts/relea
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-12
+
 ### Security
 - The live feed (`/ws`) only accepts connections opened from the dashboard itself. Before, any website you visited while logged in to your reverse proxy could open it in the background and read your traffic. If your proxy rewrites the `Host` header, list your dashboard's address in `ALLOWED_ORIGINS`.
 - The page is served with a strict Content-Security-Policy: only its own scripts, styles and fonts can load.
@@ -60,5 +62,6 @@ First public release.
 - `/api/density` validates the bucket count itself (CodeQL `js/resource-exhaustion`).
 - Local `docker build` copied host `node_modules` into the image.
 
-[Unreleased]: https://github.com/CorentinGrard/globegate/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/CorentinGrard/globegate/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/CorentinGrard/globegate/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/CorentinGrard/globegate/releases/tag/v1.0.0
