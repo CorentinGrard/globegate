@@ -21,11 +21,11 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^13.2.0",
     "express": "^5.3.0",
     "maxmind": "^4.3.21",
     "tail": "^2.2.6",
-    "ws": "^8.22.2"
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
